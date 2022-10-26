@@ -1,8 +1,14 @@
 import argparse
-from random import random
+import random
+from tkinter import W
 from typing import Tuple, Union
 import torch
 import torch.nn as nn
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+
+
+import mnist_networks
 
 from model_manifold.data_matrix import jacobian
 
@@ -12,7 +18,9 @@ class model_curvature_computer:
     
     def __init__(
         self,
-        network: nn.model,
+        network: nn.Module,
+        network_score: nn.Module,
+        input_space: datasets,
         verbose: bool=True,
         ) -> None:
         """Initialize the curvature computer for a given trained network.
@@ -24,8 +32,10 @@ class model_curvature_computer:
         """
         
         self.network = network
+        self.network_score = network_score
         self.verbose = verbose
-        self.input_space = NotImplemented
+        self.input_space = input_space
+        self.device = next(self.network.parameters()).device
         
     def get_point(
         self,
@@ -143,10 +153,10 @@ class model_curvature_computer:
         
         J_s = self.jac_score(eval_point)
         p = self.proba(eval_point)
-        P = torch.diag(p)
-        pp = torch.einsum("i,j -> ij", p, p)
+        P = torch.diag_embed(p, dim1=1)
+        pp = torch.einsum("zi,zj -> zij", p, p)
         
-        return torch.einsum("ji, jk, kl -> il", J_s, (P - pp), J_s)
+        return torch.einsum("zji, zjk, zkl -> zil", J_s, (P - pp), J_s)
 
     
     def hessian_gradproba(
@@ -171,10 +181,10 @@ class model_curvature_computer:
         N = P.expand(C, -1)
         
         """Compute """
-        first_term = torch.einsum("bi, ki, ak, al -> abl", J_p, J_s, (I-N), J_p) 
+        first_term = torch.einsum("zbi, zki, zak, zal -> zabl", J_p, J_s, (I-N).unsqueeze(0), J_p) 
         
         """Compute """
-        second_term = torch.einsum("a, bi, ki, kl -> abl", P, J_p, J_s, J_p )
+        second_term = torch.einsum("za, zbi, zki, zkl -> zabl", P, J_p, J_s, J_p )
         
         return first_term - second_term
 
@@ -217,7 +227,7 @@ class model_curvature_computer:
         J_p = self.jac_proba(eval_point)
         lie = self.lie_bracket(eval_point)
 
-        return torch.einsum("ai, ij, bcj -> abc", J_p, G, lie) 
+        return torch.einsum("zai, zij, zbcj -> zabc", J_p, G, lie) 
         
     
     def grad_bra_grad(
@@ -227,25 +237,33 @@ class model_curvature_computer:
         """Function computing 𝛁p_a〈𝛁p_b, 𝛁p_c〉
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
-            which the expression is evaluated.
+            eval_point (torch.Tensor): Batch of points of the 
+            input space at which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor 𝛁p_a〈𝛁p_b, 𝛁p_c〉with dimensions (a, b, c)
+            torch.Tensor: Tensor 𝛁p_a〈𝛁p_b, 𝛁p_c〉with dimensions (bs, a, b, c)
         """
         
         U = self.dot_product_matrix(eval_point)
         p = self.proba(eval_point)
         J_p = self.jac_proba(eval_point)
         J_s = self.jac_score(eval_point)
+
+        print(f'Shape of p: {p.shape}')
         
         """Compute p_k ∇p_l"""
-        p_gradp = torch.einsum("l, ik -> ikl", p, J_p)
+        p_gradp = torch.einsum("zl, zki -> zikl", p, J_p)
         
         """Compute δ_kl 𝛁p_k"""
         delta_gradp = torch.eye(J_p.shape[-2]) * J_p.unsqueeze(-1).transpose(-2, -3)
-    
-        return torch.einsum("bk, ai, ikl, cl -> abc" J_s, J_p, delta_gradp - p_gradp - p_gradp.transpose(-1,-2), J_s)
+       
+        if self.verbose: 
+            print(f"Shape of J_s: {J_s.shape}")
+            print(f"Shape of J_p: {J_p.shape}")
+            print(f"Shape of delta: {delta_gradp.shape}")
+            print(f"Shape of pgradp: {p_gradp.shape}")
+         
+        return torch.einsum("zbk, zai, zikl, zcl -> zabc", J_s, J_p, delta_gradp - p_gradp - p_gradp.transpose(-1,-2), J_s)
     
     
     def bra_connection(
@@ -265,7 +283,7 @@ class model_curvature_computer:
         elmt_1 = self.grad_bra_grad(eval_point)
         elmt_2 = self.bra_grad_lie(eval_point)
         
-        return ( elmt_1 + elmt_1.permute(1, 2, 0) - elmt_1.permute(2, 0, 1) - elmt_2 + elmt_2.permute(1, 2, 0) + elmt_2.permute(2, 0, 1) ) / 2 
+        return ( elmt_1 + elmt_1.permute(2, 3, 1) - elmt_1.permute(3, 1, 2) - elmt_2 + elmt_2.permute(2, 3, 1) + elmt_2.permute(3, 1, 2) ) / 2 
 
     
     
@@ -287,21 +305,29 @@ class model_curvature_computer:
         G = self.local_data_matrix(eval_point)
         G_inv = G.inverse()
         
-        return torch.einsum("il, kjl -> ijk", G_inv, C)
+        return torch.einsum("zil, zkjl -> zijk", G_inv, C)
     
+    
+    def grad_connection(
+        self,
+        eval_point: torch.Tensor,
+    ) -> torch.Tensor:        
+        
+        return jacobian(self.connection_form, eval_point)
     
     def d_connection_form(
         self,
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute the exterior derivative of the connection form: dω(e_a, e_b).
+        """Compute the exterior derivative of the connection form: dω^i_j(e_a, e_b).
+        It uses the formula \om
 
         Args:
             eval_point (torch.Tensor): point of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor dω(e_a, e_b)^i_j with dimensions (i, j, a, b).
+            torch.Tensor: Tensor dω^i_j(e_a, e_b) with dimensions (i, j, a, b).
         """
         
         return NotImplemented
@@ -311,14 +337,36 @@ class model_curvature_computer:
         self,
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute the exterior product of the connection forms: ω(e_a) ∧ ω(e_b).
+        """Compute the exterior product of the connection forms: ω^i_j(e_a) ∧ ω^i_j(e_b).
 
         Args:
             eval_point (torch.Tensor): point of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor (ω(e_a) ∧ ω(e_b))^i_j with dimensions (i, j, a, b).
+            torch.Tensor: Tensor (ω^i_j(e_a) ∧ ω^i_j(e_b)) with dimensions (i, j, a, b).
         """
         
         return NotImplemented
+
+        
+        
+if __name__ == "__main__":
+    checkpoint_path = './checkpoint/medium_cnn_10.pt'
+    network = mnist_networks.medium_cnn(checkpoint_path)
+    network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
+    device = next(network.parameters()).device
+            
+    normalize = transforms.Normalize((0.1307,), (0.3081,))
+
+    input_space = datasets.MNIST(
+        "data",
+        train=False,  # TODO: True ?
+        download=True,
+        transform=transforms.Compose([transforms.ToTensor(), normalize]),
+    )
+    curvature = model_curvature_computer(network, network_score, input_space)
+    
+    point = curvature.get_point()[0].unsqueeze(0)
+    gco = curvature.grad_connection(point)
+    print(gco.shape)
