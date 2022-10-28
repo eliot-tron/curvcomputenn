@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-
+import matplotlib.pyplot as plt
 
 import mnist_networks
 
@@ -99,13 +99,14 @@ class model_curvature_computer:
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
 
-        print(f"shape of eval_point = {eval_point.shape}")
-        print(f"shape of output = {self.proba(eval_point).shape}")
+        if self.verbose:
+            print(f"shape of eval_point = {eval_point.shape}")
+            print(f"shape of output = {self.proba(eval_point).shape}")
         j = jacobian(self.proba, eval_point) # TODO: vérifier dans le cadre non batched
-        print(f"shape of j before reshape = {j.shape}")
+        if self.verbose: print(f"shape of j before reshape = {j.shape}")
         j = j.sum(2)
         j = j.reshape(*(j.shape[:-3]), -1)
-        print(f"shape of j after reshape = {j.shape}")
+        if self.verbose: print(f"shape of j after reshape = {j.shape}")
         
 
         return j
@@ -116,14 +117,15 @@ class model_curvature_computer:
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
         
-        print(f"shape of eval_point = {eval_point.shape}")
-        print(f"shape of output = {self.proba(eval_point).shape}")
+        if self.verbose:
+            print(f"shape of eval_point = {eval_point.shape}")
+            print(f"shape of output = {self.proba(eval_point).shape}")
         j = jacobian(self.score, eval_point)
-        print(f"shape of j before reshape = {j.shape}")
+        if self.verbose: print(f"shape of j before reshape = {j.shape}")
         
         j = j.sum(2)
         j = j.reshape(*(j.shape[:-3]), -1)
-        print(f"shape of j after reshape = {j.shape}")
+        if self.verbose: print(f"shape of j after reshape = {j.shape}")
         
         return j
 
@@ -166,11 +168,11 @@ class model_curvature_computer:
         """Function computing H(p_a)𝛁p_b 
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor (H(p_a)𝛁p_b)_l with dimensions (a,b,l).
+            torch.Tensor: Tensor (H(p_a)𝛁p_b)_l with dimensions (bs, a,b,l).
         """
 
         J_p = self.jac_proba(eval_point)
@@ -197,11 +199,11 @@ class model_curvature_computer:
         """Function computing [𝛁p_a, 𝛁p_b] = H(p_b)𝛁p_a - H(p_a)𝛁p_b
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor [𝛁p_a, 𝛁p_b]_l with dimensions (a,b,l)
+            torch.Tensor: Tensor [𝛁p_a, 𝛁p_b]_l with dimensions (bs, a,b,l)
         """
 
         H_grad = self.hessian_gradproba(eval_point)
@@ -216,11 +218,11 @@ class model_curvature_computer:
         """Function computing 〈𝛁p_a, [𝛁p_b, 𝛁p_c]〉
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor 〈𝛁p_a, [𝛁p_b, 𝛁p_c]〉 with dimensions (a, b, c)
+            torch.Tensor: Tensor 〈𝛁p_a, [𝛁p_b, 𝛁p_c]〉 with dimensions (bs, a, b, c)
         """
 
         G = self.local_data_matrix(eval_point)
@@ -244,10 +246,13 @@ class model_curvature_computer:
             torch.Tensor: Tensor 𝛁p_a〈𝛁p_b, 𝛁p_c〉with dimensions (bs, a, b, c)
         """
         
-        U = self.dot_product_matrix(eval_point)
         p = self.proba(eval_point)
+        P = torch.diag_embed(p, dim1=1)
+        pp = torch.einsum("zi,zj -> zij", p, p)
         J_p = self.jac_proba(eval_point)
         J_s = self.jac_score(eval_point)
+
+        H_grad = self.hessian_gradproba(eval_point)
 
         print(f'Shape of p: {p.shape}')
         
@@ -256,15 +261,23 @@ class model_curvature_computer:
         
         """Compute δ_kl 𝛁p_k"""
         delta_gradp = torch.eye(J_p.shape[-2]) * J_p.unsqueeze(-1).transpose(-2, -3)
-       
+ 
         if self.verbose: 
             print(f"Shape of J_s: {J_s.shape}")
             print(f"Shape of J_p: {J_p.shape}")
             print(f"Shape of delta: {delta_gradp.shape}")
             print(f"Shape of pgradp: {p_gradp.shape}")
+
+        elmt_1 = torch.einsum("zbai, zdi, zde, zej, zcj -> zabc", H_grad, J_s, (P - pp), J_s, J_p)
+        elmt_2 = torch.einsum("zai, zbj, zdj, zide, zek, zck -> zabc", J_p, J_p, J_s, delta_gradp - p_gradp - p_gradp.transpose(-1,-2), J_s, J_p)
+
          
-        return torch.einsum("zbk, zai, zikl, zcl -> zabc", J_s, J_p, delta_gradp - p_gradp - p_gradp.transpose(-1,-2), J_s)
-    
+        if self.verbose: 
+            print(f"Shape of elmt_1: {elmt_1.shape}")
+            print(f"Shape of elmt_2: {elmt_2.shape}")
+
+         
+        return elmt_1 + elmt_2 + elmt_1.permute(0, 1, 3, 2) 
     
     def bra_connection(
         self,
@@ -273,19 +286,18 @@ class model_curvature_computer:
         """Function computing ⟨∇_(e_a) e_b, e_c⟩ with e_a = ∇p_a
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor ⟨∇_(e_a) e_b, e_c⟩ with dimensions (a, b, c)
+            torch.Tensor: Tensor ⟨∇_(e_a) e_b, e_c⟩ with dimensions (bs, a, b, c)
         """
         
         elmt_1 = self.grad_bra_grad(eval_point)
         elmt_2 = self.bra_grad_lie(eval_point)
         
-        return ( elmt_1 + elmt_1.permute(2, 3, 1) - elmt_1.permute(3, 1, 2) - elmt_2 + elmt_2.permute(2, 3, 1) + elmt_2.permute(3, 1, 2) ) / 2 
+        return ( elmt_1 + elmt_1.permute(0, 2, 3, 1) - elmt_1.permute(0, 3, 1, 2) - elmt_2 + elmt_2.permute(0, 2, 3, 1) + elmt_2.permute(0, 3, 1, 2) ) / 2 
 
-    
     
     def connection_form(
         self,
@@ -294,60 +306,148 @@ class model_curvature_computer:
         """Compute the connection form ω(e_k) on the basis e_k = ∇p_k.
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor ω^i_j(e_k) with dimensions (i, j, k) 
+            torch.Tensor: Tensor ω^i_j(e_k) with dimensions (bs, i, j, k) 
         """
         
         C = self.bra_connection(eval_point)
+        J_p = self.jac_proba(eval_point)
         G = self.local_data_matrix(eval_point)
-        G_inv = G.inverse()
+        G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
+        G_inv = G_on_data.inverse()
+        # if self.verbose:
+        #     print("plotting")
+        #     plt.matshow(G_on_data[0].detach().numpy())
+        #     plt.show()
+        #     plt.matshow(G_inv[0].detach().numpy())
+        #     plt.show()
         
         return torch.einsum("zil, zkjl -> zijk", G_inv, C)
     
     
-    def grad_connection(
+    def jac_connection(
         self,
         eval_point: torch.Tensor,
-    ) -> torch.Tensor:        
+    ) -> torch.Tensor:
+        """Compute the jacobian of the connection form.
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor ∂_l ω^i_j(e_k) with dimensions (bs, i, j, k, l)
+        """
+
+        if self.verbose:
+            print(f"GC: shape of eval_point = {eval_point.shape}")
+            print(f"GC: shape of output = {self.proba(eval_point).shape}")
+        j = jacobian(self.connection_form, eval_point)
+        if self.verbose: print(f"GC: shape of j before reshape = {j.shape}")
         
-        return jacobian(self.connection_form, eval_point)
+        j = j.sum(4)  # TODO: vérifier pourquoi on somme sur les batchs de l'entrée
+        j = j.reshape(*(j.shape[:-3]), -1)
+        if self.verbose: print(f"GC: shape of j after reshape = {j.shape}")
+        
+        
+        return j
+    
+    
+    def connection_lie(
+        self,
+        eval_point: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute ω^i_j([e_a, e_b])
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor ω^i_j([e_a, e_b]) with dimensions (bs, i, j, a, b).
+        """
+        
+        omega = self.connection_form(eval_point)
+        J_p = self.jac_proba(eval_point)
+        J_s = self.jac_score(eval_point)
+        P = self.proba(eval_point)
+        C = P.shape[-1]
+        I = torch.eye(C)
+        N = P.expand(C, -1)
+        
+        elmt_1 = torch.einsum("zbl, zcl, zac, zija -> zijab", J_p, J_s, (I-N).unsqueeze(0), omega) 
+
+        elmt_2 = torch.einsum("za, zbl, zkl, zijk -> zijab", P, J_p, J_s, omega)
+        
+        return (elmt_1 - elmt_2).transpose(-1, -2) - (elmt_1 - elmt_2)
+
     
     def d_connection_form(
         self,
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
         """Compute the exterior derivative of the connection form: dω^i_j(e_a, e_b).
-        It uses the formula \om
+        It uses the formula dω^i_j(X,Y) = Xω^i_j(Y) - Yω^i_j(X) - ω^i_j([X,Y]).
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor dω^i_j(e_a, e_b) with dimensions (i, j, a, b).
+            torch.Tensor: Tensor dω^i_j(e_a, e_b) with dimensions (bs, i, j, a, b).
         """
         
-        return NotImplemented
+        J_omega = self.jac_connection(eval_point)
+        J_p = self.jac_proba(eval_point)
+        elmt_1 = torch.einsum("zak, zijbk -> zijab", J_p, J_omega)
+        elmt_2 = self.connection_lie(eval_point)
+        
+        
+        return elmt_1 - elmt_1.transpose(-1, -2) - elmt_2
         
         
     def wedge_connection_forms(
         self,
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute the exterior product of the connection forms: ω^i_j(e_a) ∧ ω^i_j(e_b).
+        """Compute the exterior product of the connection forms: ∑_k ω^i_k(e_a) ∧ ω^k_j(e_b).
 
         Args:
-            eval_point (torch.Tensor): point of the input space at
+            eval_point (torch.Tensor): Batch of points of the input space at
             which the expression is evaluated.
 
         Returns:
-            torch.Tensor: Tensor (ω^i_j(e_a) ∧ ω^i_j(e_b)) with dimensions (i, j, a, b).
+            torch.Tensor: Tensor (∑_k ω^i_k(e_a) ∧ ω^k_j(e_b)) with dimensions (bs, i, j, a, b).
         """
         
-        return NotImplemented
+        omega = self.connection_form(eval_point)
+        
+        elmt = torch.einsum("zika, zkjb -> zijab", omega, omega)
+
+        return elmt - elmt.transpose(-1, -2)
+
+    
+    def curvature_form(
+        self,
+        eval_point: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute the curvature forms Ω^i_j(e_a, e_b).
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor (Ω^i_j(e_a, e_b)) with dimensions (bs, i, j, a, b)
+        """
+
+        domega = self.d_connection_form(eval_point)
+        wedge = self.wedge_connection_forms(eval_point)
+
+        return domega + wedge
 
         
         
@@ -365,8 +465,9 @@ if __name__ == "__main__":
         download=True,
         transform=transforms.Compose([transforms.ToTensor(), normalize]),
     )
-    curvature = model_curvature_computer(network, network_score, input_space)
+    curvature = model_curvature_computer(network, network_score, input_space, verbose=True)
     
     point = curvature.get_point()[0].unsqueeze(0)
-    gco = curvature.grad_connection(point)
-    print(gco.shape)
+    Omega = curvature.curvature_form(point)
+    print(Omega.max(), Omega.min())
+    print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")

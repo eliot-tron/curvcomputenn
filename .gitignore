@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# profiler
+*.prof
+*.lprof
+
 # C extensions
 *.so
 
