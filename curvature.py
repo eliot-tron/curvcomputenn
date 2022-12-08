@@ -56,7 +56,6 @@ class model_curvature_computer:
             index = random.randrange(len(self.input_space))
         point = self.input_space[index][0].to(self.device)
         label = self.input_space[index][1]
-        print()
         
         return point, label
 
@@ -179,11 +178,11 @@ class model_curvature_computer:
         J_s = self.jac_score(eval_point)
         P = self.proba(eval_point)
         C = P.shape[-1]
-        I = torch.eye(C)
-        N = P.expand(C, -1)
+        I = torch.eye(C).unsqueeze(0)
+        N = P.unsqueeze(-2).expand(-1, C, -1)
         
         """Compute """
-        first_term = torch.einsum("zbi, zki, zak, zal -> zabl", J_p, J_s, (I-N).unsqueeze(0), J_p) 
+        first_term = torch.einsum("zbi, zki, zak, zal -> zabl", J_p, J_s, (I-N), J_p) 
         
         """Compute """
         second_term = torch.einsum("za, zbi, zki, zkl -> zabl", P, J_p, J_s, J_p )
@@ -388,11 +387,11 @@ class model_curvature_computer:
         J_s = self.jac_score(eval_point)
         P = self.proba(eval_point)
         C = P.shape[-1]
-        I = torch.eye(C)
-        N = P.expand(C, -1)  # TODO: verify
+        I = torch.eye(C).unsqueeze(0)
+        N = P.unsqueeze(-2).expand(-1, C, -1)
         # print(N)
         
-        elmt_1 = torch.einsum("zbl, zcl, zac, zija -> zijab", J_p, J_s, (I-N).unsqueeze(0), omega) 
+        elmt_1 = torch.einsum("zbl, zcl, zac, zija -> zijab", J_p, J_s, (I-N), omega) 
 
         elmt_2 = torch.einsum("za, zbl, zkl, zijk -> zijab", P, J_p, J_s, omega)
         
@@ -418,12 +417,12 @@ class model_curvature_computer:
         H_grad = self.hessian_gradproba(eval_point)
         P = self.proba(eval_point)
         C = P.shape[-1]
-        I = torch.eye(C)
-        N = P.expand(C, -1)
+        I = torch.eye(C).unsqueeze(0)
+        N = P.unsqueeze(-2).expand(-1, C, -1)
         
         result = - torch.einsum('zai, zki, zkj, zbj, zcl -> zabcl',
                                  J_p, J_p, J_s, J_p, J_p) \
-                + torch.einsum('zck, zki, zbai, zcl -> zabcl' 
+                + torch.einsum('zck, zki, zbai, zcl -> zabcl',
                                (I-N), J_s, H_grad, J_p) \
                 + torch.einsum('zck, zki, zbi, zcal -> zabcl', 
                                (I-N), J_s, J_p, H_grad) \
@@ -462,10 +461,49 @@ class model_curvature_computer:
                 + torch.einsum('zcbk, zakl, zdl -> zabcd',
                                H_grad, grad_G, J_p) \
                 + torch.einsum('zcbk, zkl, zdal -> zabcd',
-                               H_grad, G, H_grad)
+                               H_grad, G, H_grad)  
 
-        # elmt_2 := e_a(∇p_c^T e_b(G_x) ∇p_d)
-        elmt_2 = NotImplemented
+        """ elmt_2_1 := ∇p_a^T H(p_c)^T e_b(G_x) ∇p_d """
+        elmt_2_1 = torch.einsum("zcak, zbkl, zdl -> zabcd",
+                                H_grad, grad_G, J_p)
+
+        J_s = self.jac_proba(eval_point)
+        p = self.proba(eval_point)
+        """Compute p_l ∇p_k"""
+        p_gradp = torch.einsum("zl, zki -> zikl", p, J_p)
+        
+        """Compute δ_kl 𝛁p_k"""
+        delta_gradp = torch.eye(J_p.shape[-2]) * J_p.unsqueeze(-1).transpose(-2, -3)
+        """Compute δ_kl H(p_k) 𝛁p_a (bs, i, a, l, k)"""
+        delta_H_grad = torch.eye(H_grad.shape[-3]) * H_grad.unsqueeze(-1).transpose(-2, -4)
+        """Compute ∇p_a^T ∇p_b"""
+        gradp_gradp = torch.einsum("zai, zbi -> zab", J_p, J_p)
+        """Compute p_k∇p_b^T ∇p_l"""
+        p_gradp_gradp = torch.einsum("zk, zbl -> zbkl", p, gradp_gradp).unsqueeze(-4)
+        """Compute (∇p_a^T ∇p_l)(∇p_b^T ∇p_k)"""
+        four_gradp = torch.einsum("zal, zbk -> zabkl", gradp_gradp, gradp_gradp)
+        """Compute e_a(A_b)_kl"""
+        grad_A = torch.einsum("zbai, zikl  -> zabkl",
+                                   H_grad, delta_gradp - p_gradp - p_gradp.transpose(-1, -2)) \
+                    + four_gradp \
+                    - 2 * p_gradp_gradp \
+                    + torch.einsum("zbi, zialk -> zabkl",
+                                   J_p, delta_H_grad) \
+                    - torch.einsum("zbi, zl, zkai -> zabkl",
+                                   J_p, p, H_grad) \
+                    + torch.einsum("zbi, zikl -> zbkl",
+                                   J_p, delta_gradp).unsqueeze(-4) \
+                    - p_gradp_gradp.transpose(-1, -2) \
+                    - four_gradp.transpose(-1, -2) 
+
+        """Compute e_a(e_b(G_x))"""
+        grad_grad_G = torch.einsum("zki, zabkl, zlj -> zabij",
+                                   J_s, grad_A, J_s)
+        """ elmt_2_2 := ∇p_c^T e_a(e_b(G_x)) ∇p_d """
+        elmt_2_2 = torch.einsum("zck, zabkl, zdl -> zabcd",
+                                J_p, grad_grad_G, J_p)
+        """ elmt_2 := e_a(∇p_c^T e_b(G_x) ∇p_d) """
+        elmt_2 =  elmt_2_1 + elmt_2_1.permute(0, 1, 2, 4, 3) + elmt_2_2
         
         return elmt_1 + elmt_1.transpose(-1, -2) + elmt_2
 
@@ -484,8 +522,20 @@ class model_curvature_computer:
             torch.Tensor: Tensor e_a (⟨e_b, [e_c, e_d]⟩) with dimensions (bs, a, b, c, d).
         """
 
+        J_p = self.jac_proba(eval_point)
+        H_grad = self.hessian_gradproba(eval_point)
+        lie = H_grad.transpose(1, 2) - H_grad
+        G = self.local_data_matrix(eval_point)        
+        grad_G = self.grad_metric(eval_point)
+        grad_H_gradp = self.grad_hessian_gradproba(eval_point)
+        grad_lie = grad_H_gradp.transpose(2, 3) - grad_H_gradp
         
-        return NotImplemented
+        return torch.einsum("zbal, zlk, zcdk -> zabcd",
+                            H_grad, G, lie) \
+             + torch.einsum("zbi, zaij, zcdi -> zabcd",
+                            J_p, grad_G, lie) \
+             + torch.einsum("zbi, zij, zacdj -> zabcd",
+                            J_p, G, grad_lie)
 
     def grad_connection_ang(
         self,
@@ -507,7 +557,12 @@ class model_curvature_computer:
         elmt_1 = self.grad_grad_ang(eval_point)
         elmt_2 = self.grad_ang_lie(eval_point)
         
-        return 0.5 * (elmt_1 + elmt_1.permute(0, 1, 3, 4, 2) - elmt_1.permute(0, 1, 4, 2, 3) - elmt_2 + elmt_2.permute(0, 1, 3, 4, 2) + elmt_2.permute(0, 1, 4, 2, 3)) 
+        return 0.5 * (elmt_1
+                      + elmt_1.permute(0, 1, 3, 4, 2)
+                      - elmt_1.permute(0, 1, 4, 2, 3)
+                      - elmt_2 
+                      + elmt_2.permute(0, 1, 3, 4, 2)
+                      + elmt_2.permute(0, 1, 4, 2, 3)) 
 
 
     def grad_connection(
@@ -525,9 +580,18 @@ class model_curvature_computer:
             torch.Tensor: Tensor e_a(ω^i_j(e_b)) with dimensions (bs, i, j, a, b).
         """
 
+        grad_connection_ang = self.grad_connection_ang(eval_point)
+        grad_ang = self.grad_bra_grad(eval_point)
+        connection = self.connection_form(eval_point)
+        J_p = self.jac_proba(eval_point)
+        G = self.local_data_matrix(eval_point)
+        G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
+        G_inv = G_on_data.inverse()
+
+        N = grad_connection_ang - torch.einsum("zicb, zaid -> zabcd", connection, grad_ang)
         
         
-        return NotImplemented
+        return torch.einsum("zdi, zabci -> zabcd", G_inv, N)
 
     
     def d_connection_form(
@@ -547,9 +611,16 @@ class model_curvature_computer:
         
         J_omega = self.jac_connection(eval_point)
         J_p = self.jac_proba(eval_point)
-        elmt_1 = torch.einsum("zak, zijbk -> zijab", J_p, J_omega)
+        elmt_1_old = torch.einsum("zak, zijbk -> zijab", J_p, J_omega)
         elmt_1 = self.grad_connection(eval_point)
         elmt_2 = self.connection_lie(eval_point)
+        mask = ~elmt_1_old.isnan() * ~ elmt_1.isnan()
+        i = 2
+        print(f"Elmt_1_old =\n {elmt_1_old[0,i,i,:4,:4]}")
+        print(f"Elmt_1 =\n {elmt_1[0,i,i,:4,:4]}")
+        print(f"Is it a good estimate for domaga? {'Yes' if torch.allclose(elmt_1[mask], elmt_1_old[mask], equal_nan = True) else 'No'}\n \
+                Error mean = {(elmt_1_old[mask]-elmt_1[mask]).pow(2).mean()}\n \
+                Max error = {(elmt_1_old[mask]-elmt_1[mask]).abs().max()} out of {max(elmt_1_old[mask].abs().max(), elmt_1[mask].abs().max())}")
         
         return elmt_1 - elmt_1.transpose(-1, -2) - elmt_2
         
@@ -612,7 +683,9 @@ if __name__ == "__main__":
     )
     curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
     
-    point = curvature.get_point()[0].unsqueeze(0)
+    point = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(1)])
+    print(f"Shape of points: {point.shape}")
     Omega = curvature.curvature_form(point)
     print(Omega.max(), Omega.min())
+    print(f"Mean curvature tensors: {Omega.mean()}")
     print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
