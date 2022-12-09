@@ -622,8 +622,8 @@ class model_curvature_computer:
         elmt_2 = self.connection_lie(eval_point)
         mask = ~elmt_1_old.isnan() * ~ elmt_1.isnan()
         i = 2
-        print(f"Elmt_1_old =\n {elmt_1_old[0,i,i,:4,:4]}")
-        print(f"Elmt_1 =\n {elmt_1[0,i,i,:4,:4]}")
+        # print(f"Elmt_1_old =\n {elmt_1_old[0,i,i,:4,:4]}")
+        # print(f"Elmt_1 =\n {elmt_1[0,i,i,:4,:4]}")
         print(f"Is it a good estimate for domaga? {'Yes' if torch.allclose(elmt_1[mask], elmt_1_old[mask], equal_nan = True) else 'No'}\n \
                 Error mean = {(elmt_1_old[mask]-elmt_1[mask]).pow(2).mean()}\n \
                 Max error = {(elmt_1_old[mask]-elmt_1[mask]).abs().max()} out of {max(elmt_1_old[mask].abs().max(), elmt_1[mask].abs().max())}")
