@@ -11,10 +11,10 @@ import torch.nn.functional as F
 from torch import optim
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 
-from xor_networks import xor_net
 from model_manifold.plot import save_images
+from xor_datasets import XorDataset
+from xor_networks import xor_net
 
 
 def train_epoch(
@@ -55,7 +55,7 @@ def test(model: nn.Module, loader: DataLoader) -> float:
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(output, target, reduction="sum").item()
-            pred = output.argmax(dim=1, keepdim=True)
+            pred = output.argmax(dim=1, keepdim=True) # TODO: check choice
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(loader.dataset)
@@ -72,15 +72,7 @@ def test(model: nn.Module, loader: DataLoader) -> float:
 
 
 def xor_loader(batch_size: int, train: bool) -> DataLoader:
-    dataset = datasets.EMNIST(
-                "data_augmented",
-                train=train,
-                download=False,
-                split='letters',
-                transform=transforms.Compose(
-                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-                ),
-        )
+    dataset = XorDataset(nsample=100000, test=not train, discrete=False)
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
@@ -88,23 +80,12 @@ def xor_loader(batch_size: int, train: bool) -> DataLoader:
         num_workers=1,
         pin_memory=True,
     )
-    idx = torch.randint(dataset.data.shape[0]-1, (16,))
-    idx = torch.arange(0, 31 ,3) + 31*10
-    save_images(dataset.data[idx,...], f'./data_augmented/visualisation_{"train" if train else "test"}', predictions=[dataset.classes[i] for i in dataset.targets[idx,...].int()])
 
     return loader
 
 
 def exemplar_batch(batch_size: int, train: bool) -> torch.Tensor:
-    dataset = datasets.EMNIST(
-        "data_augmented",
-        train=train,
-        download=False,
-        split='letters',
-        transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-        ),
-    )
+    dataset = XorDataset()
     examples = []
     for i in range(batch_size):
         examples.append(dataset[i][0])
@@ -114,7 +95,7 @@ def exemplar_batch(batch_size: int, train: bool) -> torch.Tensor:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train a basic model on MNIST",
+        description="Train a basic model on XOR",
         usage="python3 mnist_training.py [--batch-size BATCH-SIZE "
         "--epochs EPOCHS --lr LR --seed SEED --output-dir OUTPUT-DIR]",
     )
@@ -138,11 +119,11 @@ if __name__ == "__main__":
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = xor_net(num_classes=27)  # 26 letters and 1 N/A
+    model = xor_net()  
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
-    train_loader = emnist_loader(args.batch_size, train=True)
-    test_loader = emnist_loader(args.batch_size, train=False)
+    train_loader = xor_loader(args.batch_size, train=True)
+    test_loader = xor_loader(args.batch_size, train=False)
 
     global_steps = []
     for epoch in range(args.epochs):

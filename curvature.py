@@ -9,6 +9,8 @@ import torchvision.datasets as datasets
 import matplotlib.pyplot as plt
 
 import mnist_networks
+import xor_networks
+import xor_datasets
 
 from model_manifold.data_matrix import jacobian
 
@@ -56,6 +58,7 @@ class model_curvature_computer:
             index = random.randrange(len(self.input_space))
         point = self.input_space[index][0].to(self.device)
         label = self.input_space[index][1]
+        if self.verbose: print(f"point: {point}, label: {label}")
         
         return point, label
 
@@ -67,6 +70,7 @@ class model_curvature_computer:
         if len(eval_point.shape) == 3:  # TODO: trouver un truc plus propre
             eval_point = eval_point.unsqueeze(0)
         p = torch.exp(self.network(eval_point))
+        if self.verbose: print(f"proba: {p}")
         return p
 
     def score(
@@ -104,7 +108,7 @@ class model_curvature_computer:
         j = jacobian(self.proba, eval_point) # TODO: vérifier dans le cadre non batched
         if self.verbose: print(f"shape of j before reshape = {j.shape}")
         j = j.sum(2)
-        j = j.reshape(*(j.shape[:-3]), -1)
+        j = j.reshape(*(j.shape[:2]), -1)
         if self.verbose: print(f"shape of j after reshape = {j.shape}")
         
 
@@ -123,7 +127,7 @@ class model_curvature_computer:
         if self.verbose: print(f"shape of j before reshape = {j.shape}")
         
         j = j.sum(2)
-        j = j.reshape(*(j.shape[:-3]), -1)
+        j = j.reshape(*(j.shape[:2]), -1)
         if self.verbose: print(f"shape of j after reshape = {j.shape}")
         
         return j
@@ -329,6 +333,7 @@ class model_curvature_computer:
         J_p = self.jac_proba(eval_point)
         G = self.local_data_matrix(eval_point)
         G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
+        print(G_on_data)
         G_inv = G_on_data.inverse()
         # if self.verbose:
         #     print("plotting")
@@ -354,15 +359,15 @@ class model_curvature_computer:
             torch.Tensor: Tensor ∂_l ω^i_j(e_k) with dimensions (bs, i, j, k, l)
         """
 
-        if self.verbose:
+        if not self.verbose:
             print(f"GC: shape of eval_point = {eval_point.shape}")
             print(f"GC: shape of output = {self.proba(eval_point).shape}")
         j = jacobian(self.connection_form, eval_point)
-        if self.verbose: print(f"GC: shape of j before reshape = {j.shape}")
+        if not self.verbose: print(f"GC: shape of j before reshape = {j.shape}")
         
         j = j.sum(4)  # TODO: vérifier pourquoi on somme sur les batchs de l'entrée
-        j = j.reshape(*(j.shape[:-3]), -1)
-        if self.verbose: print(f"GC: shape of j after reshape = {j.shape}")
+        j = j.reshape(*(j.shape[:4]), -1)
+        if not self.verbose: print(f"GC: shape of j after reshape = {j.shape}")
         
         
         return j
@@ -610,6 +615,7 @@ class model_curvature_computer:
         """
         
         J_omega = self.jac_connection(eval_point)
+        print(f"J_omega: {J_omega.shape}")
         J_p = self.jac_proba(eval_point)
         elmt_1_old = torch.einsum("zak, zijbk -> zijab", J_p, J_omega)
         elmt_1 = self.grad_connection(eval_point)
@@ -668,19 +674,29 @@ class model_curvature_computer:
         
         
 if __name__ == "__main__":
-    checkpoint_path = './checkpoint/medium_cnn_10.pt'
-    network = mnist_networks.medium_cnn(checkpoint_path)
-    network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
+    mnist = False
+    if mnist:
+        checkpoint_path = './checkpoint/medium_cnn_10.pt'
+        network = mnist_networks.medium_cnn(checkpoint_path)
+        network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
+
+        normalize = transforms.Normalize((0.1307,), (0.3081,))
+
+        input_space = datasets.MNIST(
+            "data",
+            train=False,  # TODO: True ?
+            download=True,
+            transform=transforms.Compose([transforms.ToTensor(), normalize]),
+        )
+    else:
+        checkpoint_path = './checkpoint/xor_net_05.pt'
+        network = xor_networks.xor_net(checkpoint_path)
+        network_score = xor_networks.xor_net(checkpoint_path, score=True)
+
+        input_space = xor_datasets.XorDataset(nsample=100000, test=True, discrete=False)
+
     device = next(network.parameters()).device
             
-    normalize = transforms.Normalize((0.1307,), (0.3081,))
-
-    input_space = datasets.MNIST(
-        "data",
-        train=False,  # TODO: True ?
-        download=True,
-        transform=transforms.Compose([transforms.ToTensor(), normalize]),
-    )
     curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
     
     point = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(1)])
