@@ -1,18 +1,21 @@
-import argparse
+from datetime import datetime
+from math import ceil, floor, sqrt
+from pathlib import Path
 import random
-from tkinter import W
+from threading import local
 from typing import Tuple, Union
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+from matplotlib.colors import SymLogNorm
 import matplotlib.pyplot as plt
 
 import mnist_networks
 import xor_networks
 import xor_datasets
 
-from model_manifold.data_matrix import jacobian
+from model_manifold.data_matrix import jacobian, local_data_matrix
 
 class model_curvature_computer:
     """A class to compute curvature and associated measures.
@@ -110,7 +113,6 @@ class model_curvature_computer:
         j = j.sum(2)
         j = j.reshape(*(j.shape[:2]), -1)
         if self.verbose: print(f"shape of j after reshape = {j.shape}")
-        
 
         return j
     
@@ -162,6 +164,18 @@ class model_curvature_computer:
         pp = torch.einsum("zi,zj -> zij", p, p)
         
         return torch.einsum("zji, zjk, zkl -> zil", J_s, (P - pp), J_s)
+
+    
+    def fim_on_data(
+        self,
+        eval_point: torch.Tensor,
+    ) -> torch.Tensor:
+        
+        J_p = self.jac_proba(eval_point)
+        G = self.local_data_matrix(eval_point)
+        G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
+
+        return G_on_data
 
     
     def hessian_gradproba(
@@ -333,11 +347,11 @@ class model_curvature_computer:
         J_p = self.jac_proba(eval_point)
         G = self.local_data_matrix(eval_point)
         G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
-        print(G_on_data)
-        G_inv = G_on_data.inverse()
+        print(f"G: {G} \nĜ {G_on_data}\nJ: {J_p}")
+        G_inv = torch.cholesky_inverse(torch.linalg.cholesky(G_on_data))
         # if self.verbose:
         #     print("plotting")
-        #     plt.matshow(G_on_data[0].detach().numpy())
+        #     plt.matshow(G_on_data[0].detach().numpy()) 
         #     plt.show()
         #     plt.matshow(G_inv[0].detach().numpy())
         #     plt.show()
@@ -591,7 +605,7 @@ class model_curvature_computer:
         J_p = self.jac_proba(eval_point)
         G = self.local_data_matrix(eval_point)
         G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
-        G_inv = G_on_data.inverse()
+        G_inv = torch.cholesky_inverse(torch.linalg.cholesky(G_on_data))
 
         N = grad_connection_ang - torch.einsum("zicb, zaid -> zabcd", connection, grad_ang)
         
@@ -671,10 +685,45 @@ class model_curvature_computer:
         
         return domega + wedge
 
+
+    def plot_debug(
+        self,
+        eval_point: torch.Tensor,
+        output_dir: Union[str, Path]="./data",
+    ) -> None:
+        saving_idx = datetime.now().strftime("%y%m%d-%H%M%S")
+        j = self.jac_proba(eval_point)
+        fim_on_data = self.fim_on_data(eval_point).detach()
+        bs, C, x = j.shape
+        bs, _, px_row, px_col = eval_point.shape
+        n_row, n_col = floor(sqrt(C)) - 1 , ceil(sqrt(C)) + 1
+        for img, jac_img, fim_img in zip(eval_point, j, fim_on_data):
+            fig_2, axes_2 = plt.subplots(1, 2)
+            
+            img_subplot = axes_2[0].matshow(img.squeeze(0))
+            fig_2.colorbar(img_subplot, ax=axes_2[0])
+            axes_2[0].set_title(f'Image.')
+            
+            fim_img_subplot = axes_2[1].matshow(fim_img, norm=SymLogNorm(fim_img.abs().min().numpy()))
+            fig_2.colorbar(fim_img_subplot, ax=axes_2[1])
+            axes_2[1].set_title(r'$G(e_i,e_j)$')
+
+            plt.savefig(f"{output_dir}/{saving_idx}_img_and_metric.pdf", transparent=True)
+            fig, axes = plt.subplots(n_row, n_col)
+
+            for classe in range(C):
+                row = classe // n_col
+                col = classe % n_col
+                im = axes[row, col].matshow(jac_img[classe].reshape(px_row, px_col))
+                axes[row, col].tick_params(left = False, right = False, top=False, labeltop=False, labelleft = False , labelbottom = False, bottom = False)
+                axes[row, col].set_title(f'Direction {classe}.')
+                fig.colorbar(im, ax=axes[row, col])
+            plt.savefig(f"{output_dir}/{saving_idx}_plot_grad_proba.pdf", transparent=True)
+        
         
         
 if __name__ == "__main__":
-    mnist = False
+    mnist = True
     if mnist:
         checkpoint_path = './checkpoint/medium_cnn_10.pt'
         network = mnist_networks.medium_cnn(checkpoint_path)
@@ -699,9 +748,18 @@ if __name__ == "__main__":
             
     curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
     
-    point = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(1)])
-    print(f"Shape of points: {point.shape}")
-    Omega = curvature.curvature_form(point)
-    print(Omega.max(), Omega.min())
-    print(f"Mean curvature tensors: {Omega.mean()}")
-    print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
+    points = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(1)])
+    print(f"Shape of points: {points.shape}")
+    random_points = torch.rand_like(points)
+    probas = curvature.jac_proba(points)
+    fim_on_data = curvature.fim_on_data(points)
+    curvature.plot_debug(points)
+    # for img, metric, proba in zip(point, fim_on_data, probas):
+    #     plt.matshow(img.squeeze(0))
+    #     plt.matshow(proba, aspect="auto")
+    #     plt.matshow(metric.detach().numpy())
+    #     plt.show()
+    # Omega = curvature.curvature_form(point)
+    # print(Omega.max(), Omega.min())
+    # print(f"Mean curvature tensors: {Omega.mean()}")
+    # print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
