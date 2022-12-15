@@ -1,3 +1,4 @@
+from os import makedirs, path
 from datetime import datetime
 from math import ceil, floor, sqrt
 from pathlib import Path
@@ -15,7 +16,20 @@ import mnist_networks
 import xor_networks
 import xor_datasets
 
-from model_manifold.data_matrix import jacobian, local_data_matrix
+from model_manifold.data_matrix import jacobian
+from plot import plot_debug
+
+def colorbar(mappable):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    last_axes = plt.gca()
+    ax = mappable.axes
+    fig = ax.figure
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = fig.colorbar(mappable, cax=cax)
+    plt.sca(last_axes)
+    return cbar
+
 
 class model_curvature_computer:
     """A class to compute curvature and associated measures.
@@ -561,9 +575,7 @@ class model_curvature_computer:
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
         """Compute e_a (⟨∇_{e_b} e_c, e_d⟩)
-        It uses the formula 2 e_a (⟨∇_{e_b} e_c, e_d⟩) = e_a (e_b ⟨e_c, e_d⟩ 
-        + e_c ⟨e_d, e_b⟩ - e_d ⟨e_b, e_c⟩ - ⟨e_b, [e_c, e_d]⟩ + ⟨e_c, [e_d, e_b]⟩
-        + ⟨e_d, [e_b, e_c]⟩).
+        It uses the formula 2 e_a (⟨∇_{e_b} e_c, e_d⟩) = e_a (e_b ⟨e_c, e_d⟩ + e_c ⟨e_d, e_b⟩ - e_d ⟨e_b, e_c⟩ - ⟨e_b, [e_c, e_d]⟩ + ⟨e_c, [e_d, e_b]⟩ + ⟨e_d, [e_b, e_c]⟩).
 
         Args:
             eval_point (torch.Tensor): Batch of points of the input space at
@@ -589,7 +601,7 @@ class model_curvature_computer:
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
         """Compute e_a(ω^i_j(e_b)).
-        It uses the formula dω^i_j(X,Y) = Xω^i_j(Y) - Yω^i_j(X) - ω^i_j([X,Y]).
+        It uses the formula e_a (⟨∇_{e_b} e_c, e_d⟩) = ∑_i e_a (ω_c^i(e_b))⟨e_i,e_d⟩ + ∑_i ω_c^i(e_b) e_a(⟨e_i,e_d⟩).
 
         Args:
             eval_point (torch.Tensor): Batch of points of the input space at
@@ -635,7 +647,7 @@ class model_curvature_computer:
         elmt_1 = self.grad_connection(eval_point)
         elmt_2 = self.connection_lie(eval_point)
         mask = ~elmt_1_old.isnan() * ~ elmt_1.isnan()
-        i = 2
+        # i = 2
         # print(f"Elmt_1_old =\n {elmt_1_old[0,i,i,:4,:4]}")
         # print(f"Elmt_1 =\n {elmt_1[0,i,i,:4,:4]}")
         print(f"Is it a good estimate for domaga? {'Yes' if torch.allclose(elmt_1[mask], elmt_1_old[mask], equal_nan = True) else 'No'}\n \
@@ -686,39 +698,53 @@ class model_curvature_computer:
         return domega + wedge
 
 
-    def plot_debug(
-        self,
-        eval_point: torch.Tensor,
-        output_dir: Union[str, Path]="./data",
-    ) -> None:
-        saving_idx = datetime.now().strftime("%y%m%d-%H%M%S")
-        j = self.jac_proba(eval_point)
-        fim_on_data = self.fim_on_data(eval_point).detach()
-        bs, C, x = j.shape
-        bs, _, px_row, px_col = eval_point.shape
-        n_row, n_col = floor(sqrt(C)) - 1 , ceil(sqrt(C)) + 1
-        for img, jac_img, fim_img in zip(eval_point, j, fim_on_data):
-            fig_2, axes_2 = plt.subplots(1, 2)
+    # def plot_debug(
+    #     self,
+    #     eval_point: torch.Tensor,
+    #     output_dir: Union[str, Path]="./output",
+    # ) -> None:
+    #     if not path.isdir(output_dir):
+    #         makedirs(output_dir)
+    #     saving_idx = datetime.now().strftime("%y%m%d-%H%M%S")
+    #     j = self.jac_proba(eval_point)
+    #     fim_on_data = self.fim_on_data(eval_point).detach()
+    #     bs, C, x = j.shape
+    #     bs, _, px_row, px_col = eval_point.shape
+    #     n_row, n_col = floor(sqrt(C)) , ceil(sqrt(C))
+    #     for img, jac_img, fim_img in zip(eval_point, j, fim_on_data):
+    #         fig_2, axes_2 = plt.subplots(1, 2, figsize=(6,3))
             
-            img_subplot = axes_2[0].matshow(img.squeeze(0))
-            fig_2.colorbar(img_subplot, ax=axes_2[0])
-            axes_2[0].set_title(f'Image.')
+    #         img_subplot = axes_2[0].matshow(img.squeeze(0))
+    #         colorbar(img_subplot)
+    #         # fig_2.colorbar(img_subplot, ax=axes_2[0])
+    #         axes_2[0].set_title(f'Image.')
             
-            fim_img_subplot = axes_2[1].matshow(fim_img, norm=SymLogNorm(fim_img.abs().min().numpy()))
-            fig_2.colorbar(fim_img_subplot, ax=axes_2[1])
-            axes_2[1].set_title(r'$G(e_i,e_j)$')
+    #         fim_img_subplot = axes_2[1].matshow(fim_img, norm=SymLogNorm(fim_img.abs().min().numpy()))
+    #         colorbar(fim_img_subplot)
+    #         # fig_2.colorbar(fim_img_subplot, ax=axes_2[1])
+    #         axes_2[1].set_title(r'$G(e_i,e_j)$')
+            
+    #         fig_2.tight_layout()
+    #         plt.savefig(f"{output_dir}/{saving_idx}_img_and_metric.pdf", transparent=True)
 
-            plt.savefig(f"{output_dir}/{saving_idx}_img_and_metric.pdf", transparent=True)
-            fig, axes = plt.subplots(n_row, n_col)
 
-            for classe in range(C):
-                row = classe // n_col
-                col = classe % n_col
-                im = axes[row, col].matshow(jac_img[classe].reshape(px_row, px_col))
-                axes[row, col].tick_params(left = False, right = False, top=False, labeltop=False, labelleft = False , labelbottom = False, bottom = False)
-                axes[row, col].set_title(f'Direction {classe}.')
-                fig.colorbar(im, ax=axes[row, col])
-            plt.savefig(f"{output_dir}/{saving_idx}_plot_grad_proba.pdf", transparent=True)
+    #         fig, axes = plt.subplots(n_row, n_col, figsize=(n_col*3, n_row*3))
+
+    #         for classe in range(C):
+    #             row = classe // n_col
+    #             col = classe % n_col
+    #             im = axes[row, col].matshow(jac_img[classe].reshape(px_row, px_col))
+    #             axes[row, col].tick_params(left = False, right = False, top=False, labeltop=False, labelleft = False , labelbottom = False, bottom = False)
+    #             axes[row, col].set_title(f'Direction {classe}.')
+    #             colorbar(im)
+    #             # fig.colorbar(im, ax=axes[row, col])
+
+    #         for axes_to_remove in range(C, n_row*n_col):
+    #             row = axes_to_remove // n_col
+    #             col = axes_to_remove % n_col
+    #             axes[row, col].axis("off")
+    #         fig.tight_layout()
+    #         plt.savefig(f"{output_dir}/{saving_idx}_plot_grad_proba.pdf", transparent=True, dpi=None)
         
         
         
@@ -748,12 +774,13 @@ if __name__ == "__main__":
             
     curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
     
-    points = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(1)])
+    points = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(6)])
     print(f"Shape of points: {points.shape}")
     random_points = torch.rand_like(points)
     probas = curvature.jac_proba(points)
     fim_on_data = curvature.fim_on_data(points)
-    curvature.plot_debug(points)
+    # curvature.plot_debug(random_points)
+    plot_debug(curvature, points)
     # for img, metric, proba in zip(point, fim_on_data, probas):
     #     plt.matshow(img.squeeze(0))
     #     plt.matshow(proba, aspect="auto")
