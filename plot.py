@@ -27,6 +27,8 @@ def plot_debug(
 
     j = curvature.jac_proba(eval_point)
     fim_on_data = curvature.fim_on_data(eval_point).detach()
+    euclidean_product_on_data = torch.einsum('zai, zki, zkj, zbj-> zab',
+                                             j, j, j, j)
     bs, C, x = j.shape
     bs, _, px_row, px_col = eval_point.shape
     j = j.reshape(bs, C, px_row, px_col)
@@ -39,10 +41,10 @@ def plot_debug(
         output_name="debug_data_point",
     )
     save_matrices(
-        matrices=fim_on_data.unsqueeze(1),
-        titles=[r"$G(e_i,e_j)$"],
+        matrices=torch.cat((fim_on_data.unsqueeze(1), euclidean_product_on_data.unsqueeze(1)), dim=1),
+        titles=[r"$G(e_i,e_j)$", r"$e_i ⋅ e_j$"],
         output_dir=output_dir,
-        output_name="debug_fim_grad_proba",
+        output_name="debug_metric_grad_proba",
         log_scales=True,
     )
     save_matrices(

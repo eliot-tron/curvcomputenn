@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from matplotlib.colors import SymLogNorm
 import matplotlib.pyplot as plt
 
 import mnist_networks
@@ -780,7 +779,7 @@ if __name__ == "__main__":
     probas = curvature.jac_proba(points)
     fim_on_data = curvature.fim_on_data(points)
     # curvature.plot_debug(random_points)
-    plot_debug(curvature, points)
+    plot_debug(curvature, random_points)
     # for img, metric, proba in zip(point, fim_on_data, probas):
     #     plt.matshow(img.squeeze(0))
     #     plt.matshow(proba, aspect="auto")
