@@ -1,10 +1,12 @@
 from datetime import datetime
 from math import ceil, floor, sqrt
 from os import makedirs, path
+from tkinter import W
 from typing import Union
 from pathlib import Path
 import torch
 import matplotlib.pyplot as plt
+from curvature import model_curvature_computer
 
 from matplotlib.colors import SymLogNorm
 
@@ -21,7 +23,7 @@ def colorbar(mappable):
     return cbar
 
 def plot_debug(
-    curvature,
+    curvature: model_curvature_computer,
     eval_point: torch.Tensor,
     ) -> None:
 
@@ -125,4 +127,97 @@ def save_matrices(
             saving_path = f"{saving_path}batch_{index_batch}_"
         saving_path = f"{saving_path}{output_name}.pdf"
 
+        plt.savefig(saving_path, transparent=True, dpi=None)
+
+
+def save_rank(
+    matrices: torch.Tensor,
+    titles: Union[list[str], str]="",
+    output_dir: Union[str, Path]='output/',
+    output_name: str="rank",
+) -> None:
+    """ Save plot of the evolution of the rank of the matrices.
+
+    Args:
+        matrices (torch.Tensor): matrices to compute the rank of with shape (bs, n, i, j)
+        titles (Union[list[str], str]): titles of the plot for each batch.
+        output_dir (Union[str, Path], optional): Directory where to save the results. Defaults to 'output/'.
+        output_name (str, optional): Name of the file. Defaults to "rank".
+    """
+
+    if not path.isdir(output_dir):
+        makedirs(output_dir)
+    
+    if len(matrices.shape) == 3:
+        matrices = matrices.unsqueeze(0)
+    
+    number_of_batch = matrices.shape[0]
+    
+    C = matrices.shape[-2]
+        
+    if isinstance(titles, str):
+        titles = [titles for _ in matrices]
+    
+    ranks = torch.linalg.matrix_rank(matrices, atol=None)
+    
+    figure, axes = plt.subplots()
+    
+    for index_batch, (rank_batch, title_batch) in enumerate(zip(ranks, titles)):
+        axes.hist(rank_batch.int().numpy(), bins=torch.arange(-0.5, C+0.5, 1), rwidth=0.6)
+        axes.set_xticks(range(C+1))
+        axes.set_xlim((0, rank_batch.max()+1))
+        axes.set_title(title_batch)
+        saving_path = f"{output_dir}"
+        if number_of_batch > 1:
+            saving_path = f"{saving_path}batch_{index_batch}_"
+        saving_path = f"{saving_path}{output_name}.pdf"
+        plt.savefig(saving_path, transparent=True, dpi=None)
+
+
+def save_eigenvalues(
+    matrices: torch.Tensor,
+    titles: Union[list[str], str]="",
+    symetric: bool=True,
+    output_dir: Union[str, Path]='output/',
+    output_name: str="eigenvalues",
+) -> None:
+    """ Save plot of the norm of the eigenvalues meaned over the matrices.
+
+    Args:
+        matrices (torch.Tensor): matrices to compute the eigenvalues of with shape (bs, n, i, j)
+        titles (Union[list[str], str]): titles of the plot for each batch.
+        output_dir (Union[str, Path], optional): Directory where to save the results. Defaults to 'output/'.
+        output_name (str, optional): Name of the file. Defaults to "eigenvalues".
+    """
+
+    if not path.isdir(output_dir):
+        makedirs(output_dir)
+    
+    if len(matrices.shape) == 3:
+        matrices = matrices.unsqueeze(0)
+    
+    number_of_batch = matrices.shape[0]
+    
+    C = matrices.shape[-2]
+        
+    if isinstance(titles, str):
+        titles = [titles for _ in matrices]
+    
+    if symetric:
+        eigenvalues = torch.linalg.eigvalsh(matrices) 
+    else:
+        eigenvalues = torch.linalg.eigvals(matrices)
+    
+    eigenvalues = eigenvalues.mean(1).abs().sort().values
+    
+    _, axes = plt.subplots()
+    
+    for index_batch, (eigenvals_batch, title_batch) in enumerate(zip(eigenvalues, titles)):
+        axes.plot(eigenvals_batch.detach().numpy())
+        axes.set_yscale('log')
+        axes.set_title(title_batch)
+        saving_path = f"{output_dir}"
+        if number_of_batch > 1:
+            saving_path = f"{saving_path}batch_{index_batch}_"
+        saving_path = f"{saving_path}{output_name}.pdf"
         plt.savefig(saving_path, transparent=True, dpi=None)

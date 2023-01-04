@@ -1,22 +1,13 @@
-from os import makedirs, path
-from datetime import datetime
-from math import ceil, floor, sqrt
-from pathlib import Path
 import random
-from threading import local
 from typing import Tuple, Union
+
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import matplotlib.pyplot as plt
-
-import mnist_networks
-import xor_networks
-import xor_datasets
 
 from model_manifold.data_matrix import jacobian
-from plot import plot_debug
+
 
 def colorbar(mappable):
     from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -744,48 +735,3 @@ class model_curvature_computer:
     #             axes[row, col].axis("off")
     #         fig.tight_layout()
     #         plt.savefig(f"{output_dir}/{saving_idx}_plot_grad_proba.pdf", transparent=True, dpi=None)
-        
-        
-        
-if __name__ == "__main__":
-    mnist = True
-    if mnist:
-        checkpoint_path = './checkpoint/medium_cnn_10.pt'
-        network = mnist_networks.medium_cnn(checkpoint_path)
-        network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
-
-        normalize = transforms.Normalize((0.1307,), (0.3081,))
-
-        input_space = datasets.MNIST(
-            "data",
-            train=False,  # TODO: True ?
-            download=True,
-            transform=transforms.Compose([transforms.ToTensor(), normalize]),
-        )
-    else:
-        checkpoint_path = './checkpoint/xor_net_05.pt'
-        network = xor_networks.xor_net(checkpoint_path)
-        network_score = xor_networks.xor_net(checkpoint_path, score=True)
-
-        input_space = xor_datasets.XorDataset(nsample=100000, test=True, discrete=False)
-
-    device = next(network.parameters()).device
-            
-    curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
-    
-    points = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(6)])
-    print(f"Shape of points: {points.shape}")
-    random_points = torch.rand_like(points)
-    probas = curvature.jac_proba(points)
-    fim_on_data = curvature.fim_on_data(points)
-    # curvature.plot_debug(random_points)
-    plot_debug(curvature, random_points)
-    # for img, metric, proba in zip(point, fim_on_data, probas):
-    #     plt.matshow(img.squeeze(0))
-    #     plt.matshow(proba, aspect="auto")
-    #     plt.matshow(metric.detach().numpy())
-    #     plt.show()
-    # Omega = curvature.curvature_form(point)
-    # print(Omega.max(), Omega.min())
-    # print(f"Mean curvature tensors: {Omega.mean()}")
-    # print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
