@@ -208,7 +208,7 @@ def save_eigenvalues(
     else:
         eigenvalues = torch.linalg.eigvals(matrices)
     
-    eigenvalues = eigenvalues.mean(1).abs().sort().values
+    eigenvalues = eigenvalues.mean(1).abs().sort(descending=True).values[...,:9,...]
     
     _, axes = plt.subplots()
     

@@ -1,4 +1,5 @@
 from curvature import model_curvature_computer
+from datetime import datetime
 import plot
 import mnist_networks
 import xor_networks
@@ -10,8 +11,12 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 if __name__ == "__main__":
-    mnist = True
-    if mnist:
+    MNIST = True
+    RANDOM = False
+    SEED = 42
+    number_of_points = 100
+
+    if MNIST:
         checkpoint_path = './checkpoint/medium_cnn_10.pt'
         network = mnist_networks.medium_cnn(checkpoint_path)
         network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
@@ -35,24 +40,37 @@ if __name__ == "__main__":
             
     curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
     
-    RANDOM = False
-    
-    images = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(100)])
+    images = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(number_of_points)])
     print(f"Shape of points: {images.shape}")
     random_points = torch.rand_like(images)
     if RANDOM:
         points = random_points
     else:
         points = images
+
     probas = curvature.jac_proba(points)
     fim_on_data = curvature.fim_on_data(points)
     local_data_matrix = curvature.local_data_matrix(points)
-    # curvature.plot_debug(random_points)
-    # plot.save_rank(fim_on_data, r"Rank of $G(e_i,e_j)$", output_name="rank_G_on_data")
-    # plot.save_rank(local_data_matrix, r"Rank of $G$", output_name="rank_G")
-    # plot.save_rank(probas, r"Rank of $(∇p_i)_i$", output_name="rank_jac")
-    plot.save_eigenvalues(local_data_matrix, r"Eigenvalues of $G$", output_name=f"eigenvalues_G_{'random' if RANDOM else 'images'}")
-    plot.save_eigenvalues(fim_on_data, r"Eigenvalues of $G(e_i,e_j)$", output_name=f"eigenvalues_G_on_data_{'random' if RANDOM else 'images'}")
+    
+    date = datetime.now().strftime("%y%m%d-%H%M%S")
+    output_dir = f"output/{date}_nsample={number_of_points}/"
+
+    plot.save_rank(fim_on_data, 
+                   r"Rank of $G(e_i,e_j)$",
+                   output_name=f"rank_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+    plot.save_rank(local_data_matrix, 
+                   r"Rank of $G$",
+                   output_name=f"rank_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+    plot.save_rank(probas, 
+                   r"Rank of $(∇p_i)_i$",
+                   output_name=f"rank_jac_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+
+    plot.save_eigenvalues(local_data_matrix, 
+                          r"Eigenvalues of $G$",
+                          output_name=f"eigenvalues_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+    plot.save_eigenvalues(fim_on_data,
+                          r"Eigenvalues of $G(e_i,e_j)$",
+                          output_name=f"eigenvalues_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
     # print(probas.norm(dim=2).min(dim=1).values.mean())
     # eigenvalues = torch.linalg.eigvalsh(local_data_matrix).mean(0).detach()
     # print(eigenvalues)
