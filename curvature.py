@@ -351,8 +351,11 @@ class model_curvature_computer:
         J_p = self.jac_proba(eval_point)
         G = self.local_data_matrix(eval_point)
         G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
-        print(f"G: {G} \nĜ {G_on_data}\nJ: {J_p}")
-        G_inv = torch.cholesky_inverse(torch.linalg.cholesky(G_on_data))
+        # G_inv = torch.cholesky_inverse(torch.linalg.cholesky(G_on_data))
+        connection_form = torch.linalg.lstsq(G_on_data.unsqueeze(1), C.transpose(-1,-2))
+        # print(f"connection form rank = {connection_form.rank}")
+        connection_form = connection_form.solution  # shape (bs, k, i, j)
+        # print(f"Shape of G_on_data: {G_on_data.shape}\n\t C: {C.shape}\n\t connection_form: {connection_form.shape}")
         # if self.verbose:
         #     print("plotting")
         #     plt.matshow(G_on_data[0].detach().numpy()) 
@@ -360,7 +363,8 @@ class model_curvature_computer:
         #     plt.matshow(G_inv[0].detach().numpy())
         #     plt.show()
         
-        return torch.einsum("zil, zkjl -> zijk", G_inv, C)
+        # return torch.einsum("zil, zkjl -> zijk", G_inv, C)
+        return connection_form.permute(0, 2, 3, 1)  # shape (bs, i, j, k)
     
     
     def jac_connection(
@@ -607,12 +611,16 @@ class model_curvature_computer:
         J_p = self.jac_proba(eval_point)
         G = self.local_data_matrix(eval_point)
         G_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, G, J_p)
-        G_inv = torch.cholesky_inverse(torch.linalg.cholesky(G_on_data))
+        # G_inv = torch.cholesky_inverse(torch.linalg.cholesky(G_on_data))
 
         N = grad_connection_ang - torch.einsum("zicb, zaid -> zabcd", connection, grad_ang)
         
+        result = torch.linalg.lstsq(G_on_data.unsqueeze(1).unsqueeze(1), N.transpose(-1, -2))
+        # print(f"grad connection rank = {result.rank}")
+        result = result.solution
         
-        return torch.einsum("zdi, zabci -> zabcd", G_inv, N)
+        return result.permute(0, 3, 4, 1, 2)
+        # return torch.einsum("zdi, zabci -> zabcd", G_inv, N)
 
     
     def d_connection_form(

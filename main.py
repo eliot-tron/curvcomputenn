@@ -11,10 +11,11 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 if __name__ == "__main__":
-    MNIST = True
+    MNIST = False
     RANDOM = False
     SEED = 42
-    number_of_points = 100
+    number_of_points = 1
+    TASK = ["rank", "curvature"][1]
 
     if MNIST:
         checkpoint_path = './checkpoint/medium_cnn_10.pt'
@@ -54,23 +55,32 @@ if __name__ == "__main__":
     
     date = datetime.now().strftime("%y%m%d-%H%M%S")
     output_dir = f"output/{date}_nsample={number_of_points}/"
+    
+    if TASK == "rank":
+        plot.save_rank(fim_on_data, 
+                    r"Rank of $G(e_i,e_j)$",
+                    output_name=f"rank_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+        plot.save_rank(local_data_matrix, 
+                    r"Rank of $G$",
+                    output_name=f"rank_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+        plot.save_rank(probas, 
+                    r"Rank of $(∇p_i)_i$",
+                    output_name=f"rank_jac_{'random' if RANDOM else 'images'}", output_dir=output_dir)
 
-    plot.save_rank(fim_on_data, 
-                   r"Rank of $G(e_i,e_j)$",
-                   output_name=f"rank_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
-    plot.save_rank(local_data_matrix, 
-                   r"Rank of $G$",
-                   output_name=f"rank_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
-    plot.save_rank(probas, 
-                   r"Rank of $(∇p_i)_i$",
-                   output_name=f"rank_jac_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+        plot.save_eigenvalues(local_data_matrix, 
+                            r"Eigenvalues of $G$",
+                            output_name=f"eigenvalues_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+        plot.save_eigenvalues(fim_on_data,
+                            r"Eigenvalues of $G(e_i,e_j)$",
+                            output_name=f"eigenvalues_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
 
-    plot.save_eigenvalues(local_data_matrix, 
-                          r"Eigenvalues of $G$",
-                          output_name=f"eigenvalues_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
-    plot.save_eigenvalues(fim_on_data,
-                          r"Eigenvalues of $G(e_i,e_j)$",
-                          output_name=f"eigenvalues_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+    if TASK == "curvature":
+        # omega = curvature.connection_form(points)
+        # print(omega)
+        Omega = curvature.curvature_form(points)
+        print(Omega.max(), Omega.min())
+        print(f"Mean curvature tensors: {Omega.mean()}")
+        print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
     # print(probas.norm(dim=2).min(dim=1).values.mean())
     # eigenvalues = torch.linalg.eigvalsh(local_data_matrix).mean(0).detach()
     # print(eigenvalues)
@@ -83,7 +93,3 @@ if __name__ == "__main__":
     #     plt.matshow(proba, aspect="auto")
     #     plt.matshow(metric.detach().numpy())
     #     plt.show()
-    # Omega = curvature.curvature_form(point)
-    # print(Omega.max(), Omega.min())
-    # print(f"Mean curvature tensors: {Omega.mean()}")
-    # print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
