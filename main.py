@@ -11,13 +11,13 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 if __name__ == "__main__":
-    MNIST = False
+    DATASET = ['MNIST', 'XOR', 'EMNIST'][2]
     RANDOM = False
     SEED = 42
-    number_of_points = 1
-    TASK = ["rank", "curvature"][1]
+    number_of_points = 100
+    TASK = ["rank", "curvature"][0]
 
-    if MNIST:
+    if DATASET == 'MNIST':
         checkpoint_path = './checkpoint/medium_cnn_10.pt'
         network = mnist_networks.medium_cnn(checkpoint_path)
         network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
@@ -30,7 +30,21 @@ if __name__ == "__main__":
             download=True,
             transform=transforms.Compose([transforms.ToTensor(), normalize]),
         )
-    else:
+    elif DATASET == 'EMNIST':
+        checkpoint_path = './checkpoint/medium_cnn_10.pt'
+        network = mnist_networks.medium_cnn(checkpoint_path)
+        network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
+
+        normalize = transforms.Normalize((0.1307,), (0.3081,))
+
+        input_space = datasets.EMNIST(
+            "data",
+            split="letters",
+            train=False,
+            download=True,
+            transform=transforms.Compose([transforms.ToTensor(), normalize]),
+        )
+    elif DATASET == 'XOR':
         checkpoint_path = './checkpoint/xor_net_05.pt'
         network = xor_networks.xor_net(checkpoint_path)
         network_score = xor_networks.xor_net(checkpoint_path, score=True)
@@ -54,7 +68,7 @@ if __name__ == "__main__":
     local_data_matrix = curvature.local_data_matrix(points)
     
     date = datetime.now().strftime("%y%m%d-%H%M%S")
-    output_dir = f"output/{date}_nsample={number_of_points}/"
+    output_dir = f"output/{DATASET}/{date}_nsample={number_of_points}/"
     
     if TASK == "rank":
         plot.save_rank(fim_on_data, 
@@ -81,6 +95,7 @@ if __name__ == "__main__":
         print(Omega.max(), Omega.min())
         print(f"Mean curvature tensors: {Omega.mean()}")
         print(f"Proportion of nan: {Omega.isnan().sum() / Omega.numel():.6f}")
+        print(Omega)
     # print(probas.norm(dim=2).min(dim=1).values.mean())
     # eigenvalues = torch.linalg.eigvalsh(local_data_matrix).mean(0).detach()
     # print(eigenvalues)
