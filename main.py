@@ -11,14 +11,15 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 if __name__ == "__main__":
-    DATASET = ['MNIST', 'XOR', 'EMNIST'][2]
+    DATASET = ['MNIST', 'XOR', 'EMNIST'][0]
     RANDOM = False
     SEED = 42
     number_of_points = 100
     TASK = ["rank", "curvature"][0]
+    restrict_to_class = 9
 
     if DATASET == 'MNIST':
-        checkpoint_path = './checkpoint/medium_cnn_10.pt'
+        checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
         network = mnist_networks.medium_cnn(checkpoint_path)
         network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
 
@@ -31,7 +32,7 @@ if __name__ == "__main__":
             transform=transforms.Compose([transforms.ToTensor(), normalize]),
         )
     elif DATASET == 'EMNIST':
-        checkpoint_path = './checkpoint/medium_cnn_10.pt'
+        checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
         network = mnist_networks.medium_cnn(checkpoint_path)
         network_score = mnist_networks.medium_cnn(checkpoint_path, score=True)
 
@@ -45,11 +46,17 @@ if __name__ == "__main__":
             transform=transforms.Compose([transforms.ToTensor(), normalize]),
         )
     elif DATASET == 'XOR':
-        checkpoint_path = './checkpoint/xor_net_05.pt'
+        checkpoint_path = './checkpoint/xor_net_relu_30.pt'
         network = xor_networks.xor_net(checkpoint_path)
         network_score = xor_networks.xor_net(checkpoint_path, score=True)
 
         input_space = xor_datasets.XorDataset(nsample=100000, test=True, discrete=False)
+    
+    if restrict_to_class is not None:
+        restriction_indices = input_space.targets == restrict_to_class
+        input_space.targets = input_space.targets[restriction_indices]
+        input_space.data = input_space.data[restriction_indices]
+
 
     device = next(network.parameters()).device
             
@@ -68,7 +75,7 @@ if __name__ == "__main__":
     local_data_matrix = curvature.local_data_matrix(points)
     
     date = datetime.now().strftime("%y%m%d-%H%M%S")
-    output_dir = f"output/{DATASET}/{date}_nsample={number_of_points}/"
+    output_dir = f"output/{DATASET}/{date}_nsample={number_of_points}{f'_class={restrict_to_class}' if restrict_to_class is not None else ''}/"
     
     if TASK == "rank":
         plot.save_rank(fim_on_data, 
