@@ -14,9 +14,9 @@ if __name__ == "__main__":
     DATASET = ['MNIST', 'XOR', 'EMNIST'][0]
     RANDOM = False
     SEED = 42
-    number_of_points = 100
+    number_of_points = 1000
     TASK = ["rank", "curvature"][0]
-    restrict_to_class = 9
+    restrict_to_class = None
 
     if DATASET == 'MNIST':
         checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
@@ -60,15 +60,15 @@ if __name__ == "__main__":
 
     device = next(network.parameters()).device
             
-    curvature = model_curvature_computer(network, network_score, input_space, verbose=False)
+    curvature = model_curvature_computer(network.double(), network_score.double(), input_space, verbose=False)
     
     images = torch.cat([curvature.get_point()[0].unsqueeze(0) for _ in range(number_of_points)])
     print(f"Shape of points: {images.shape}")
     random_points = torch.rand_like(images)
     if RANDOM:
-        points = random_points
+        points = random_points.double()
     else:
-        points = images
+        points = images.double()
 
     probas = curvature.jac_proba(points)
     fim_on_data = curvature.fim_on_data(points)
@@ -80,13 +80,19 @@ if __name__ == "__main__":
     if TASK == "rank":
         plot.save_rank(fim_on_data, 
                     r"Rank of $G(e_i,e_j)$",
-                    output_name=f"rank_G_on_data_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+                    output_name=f"rank_G_on_data_{'random' if RANDOM else 'images'}",
+                    output_dir=output_dir,
+                    hermitian=True,)
         plot.save_rank(local_data_matrix, 
                     r"Rank of $G$",
-                    output_name=f"rank_G_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+                    output_name=f"rank_G_{'random' if RANDOM else 'images'}",
+                    output_dir=output_dir,
+                    hermitian=True,)
         plot.save_rank(probas, 
                     r"Rank of $(∇p_i)_i$",
-                    output_name=f"rank_jac_{'random' if RANDOM else 'images'}", output_dir=output_dir)
+                    output_name=f"rank_jac_{'random' if RANDOM else 'images'}",
+                    output_dir=output_dir,
+                    hermitian=False)
 
         plot.save_eigenvalues(local_data_matrix, 
                             r"Eigenvalues of $G$",

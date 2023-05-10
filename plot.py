@@ -135,6 +135,7 @@ def save_rank(
     titles: Union[list[str], str]="",
     output_dir: Union[str, Path]='output/',
     output_name: str="rank",
+    hermitian: bool=False,
 ) -> None:
     """ Save plot of the evolution of the rank of the matrices.
 
@@ -152,13 +153,14 @@ def save_rank(
         matrices = matrices.unsqueeze(0)
     
     number_of_batch = matrices.shape[0]
+    matrices = matrices.double()
     
     C = matrices.shape[-2]
         
     if isinstance(titles, str):
         titles = [titles for _ in matrices]
     
-    ranks = torch.linalg.matrix_rank(matrices, atol=None)
+    ranks = torch.linalg.matrix_rank(matrices, atol=None, hermitian=hermitian)
     
     figure, axes = plt.subplots()
     
@@ -198,6 +200,7 @@ def save_eigenvalues(
     
     number_of_batch = matrices.shape[0]
     
+    matrices = matrices.double()
     C = matrices.shape[-2]
         
     if isinstance(titles, str):
@@ -208,12 +211,14 @@ def save_eigenvalues(
     else:
         eigenvalues = torch.linalg.eigvals(matrices)
     
-    eigenvalues = eigenvalues.mean(1).abs().sort(descending=True).values[...,:9,...]
+    eigenvalues = eigenvalues.mean(1).abs().sort(descending=True).values[...,:19,...]
     
     _, axes = plt.subplots()
     
     for index_batch, (eigenvals_batch, title_batch) in enumerate(zip(eigenvalues, titles)):
-        axes.plot(eigenvals_batch.detach().numpy())
+        axes.plot(range(9), eigenvals_batch.detach().numpy()[:9], "bo")
+        axes.plot(range(9, len(eigenvals_batch)), eigenvals_batch.detach().numpy()[9:], "ro")
+        axes.set_xticks(range(len(eigenvals_batch)))
         axes.set_yscale('log')
         axes.set_title(title_batch)
         saving_path = f"{output_dir}"
