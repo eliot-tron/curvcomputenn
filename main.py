@@ -12,10 +12,10 @@ import torchvision.transforms as transforms
 
 if __name__ == "__main__":
     DATASET = ['MNIST', 'XOR', 'EMNIST'][0]
-    RANDOM = False
+    RANDOM = True
     SEED = 42
-    number_of_points = 1000
-    TASK = ["rank", "curvature"][0]
+    number_of_points = 1
+    TASK = ["rank", "curvature"][1]
     restrict_to_class = None
 
     if DATASET == 'MNIST':
