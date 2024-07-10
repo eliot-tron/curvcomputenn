@@ -14,8 +14,8 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from mnist_networks import medium_cnn
-from model_manifold.data_matrix import batch_data_matrix_trace_rank
-from model_manifold.plot import save_ranks, save_mean_trace, save_images
+# from model_manifold.data_matrix import batch_data_matrix_trace_rank
+# from model_manifold.plot import save_ranks, save_mean_trace, save_images
 
 
 def train_epoch(
@@ -45,18 +45,18 @@ def train_epoch(
                 )
             )
             steps.append(batch_idx)
-            batch_traces, batch_ranks = batch_data_matrix_trace_rank(
-                model, reference_batch
-            )
+            # batch_traces, batch_ranks = batch_data_matrix_trace_rank(
+            #     model, reference_batch
+            # )
             # batch_FIM_traces, batch_FIM_ranks = batch_fisher_matrix_trace_rank(
             #     model, reference_batch
             # )
-            traces.append(batch_traces)
-            ranks.append(batch_ranks)
+            # traces.append(batch_traces)
+            # ranks.append(batch_ranks)
         optimizer.step()
     steps = torch.tensor(steps)
-    ranks = torch.stack(ranks, dim=1)
-    traces = torch.stack(traces, dim=1)
+    # ranks = torch.stack(ranks, dim=1)
+    # traces = torch.stack(traces, dim=1)
     return steps, ranks, traces
 
 
@@ -89,11 +89,13 @@ def test(model: nn.Module, loader: DataLoader) -> float:
 def mnist_loader(batch_size: int, train: bool) -> DataLoader:
     loader = torch.utils.data.DataLoader(
         datasets.MNIST(
-            "data_augmented",
+            "data",
             train=train,
             download=False,
             transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+                [transforms.ToTensor(), 
+                #  transforms.Normalize((0.1307,), (0.3081,))
+                ]
             ),
         ),
         batch_size=batch_size,
@@ -110,7 +112,9 @@ def emnist_loader(batch_size: int, train: bool) -> DataLoader:
                 download=False,
                 split='letters',
                 transform=transforms.Compose(
-                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+                    [transforms.ToTensor(), 
+                    #  transforms.Normalize((0.1307,), (0.3081,))
+                    ]
                 ),
         )
     loader = torch.utils.data.DataLoader(
@@ -122,19 +126,20 @@ def emnist_loader(batch_size: int, train: bool) -> DataLoader:
     )
     idx = torch.randint(dataset.data.shape[0]-1, (16,))
     idx = torch.arange(0, 31 ,3) + 31*10
-    save_images(dataset.data[idx,...], f'./data_augmented/visualisation_{"train" if train else "test"}', predictions=[dataset.classes[i] for i in dataset.targets[idx,...].int()])
+    # save_images(dataset.data[idx,...], f'./data_augmented/visualisation_{"train" if train else "test"}', predictions=[dataset.classes[i] for i in dataset.targets[idx,...].int()])
 
     return loader
 
 
 def exemplar_batch(batch_size: int, train: bool) -> torch.Tensor:
-    dataset = datasets.EMNIST(
-        "data_augmented",
+    dataset = datasets.MNIST(
+        "data",
         train=train,
         download=False,
-        split='letters',
         transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            [transforms.ToTensor(), 
+            #  transforms.Normalize((0.1307,), (0.3081,))
+            ]
         ),
     )
     examples = []
@@ -160,6 +165,19 @@ if __name__ == "__main__":
         default="checkpoint",
         help="Model checkpoint output directory",
     )
+    parser.add_argument(
+        "--nl",
+        type=str,
+        metavar='f',
+        default="ReLU",
+        choices=['Sigmoid', 'ReLU', 'GELU'],
+        help="Non linearity used by the network."
+    )
+    parser.add_argument(
+        "--maxpool",
+        action="store_true",
+        help="Use the legacy architecture with maxpool2D instead of avgpool2d."
+    )
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -170,11 +188,21 @@ if __name__ == "__main__":
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = medium_cnn(num_classes=27)  # 26 letters and 1 N/A
+    # model = medium_cnn(num_classes=27)  # 26 letters and 1 N/A
+    non_linearity = args.nl
+    if non_linearity == 'Sigmoid':
+        non_linearity_function = nn.Sigmoid()
+    elif non_linearity == 'ReLU':
+        non_linearity_function = nn.ReLU()
+    elif non_linearity == 'GELU':
+        non_linearity_function = nn.GELU()
+    else:
+        raise NotImplementedError
+    model = medium_cnn(num_classes=10, non_linearity=non_linearity_function, maxpool=args.maxpool)
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
-    train_loader = emnist_loader(args.batch_size, train=True)
-    test_loader = emnist_loader(args.batch_size, train=False)
+    train_loader = mnist_loader(args.batch_size, train=True)
+    test_loader = mnist_loader(args.batch_size, train=False)
 
     global_steps = []
     global_ranks = []
@@ -187,18 +215,18 @@ if __name__ == "__main__":
         global_ranks.append(epoch_ranks)
         global_traces.append(epoch_traces)
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"medium_cnn_{epoch + 1:02d}.pt")
+        torch.save(model.state_dict(), output_dir / f"mnist_medium_cnn_{epoch + 1:02d}_{'maxpool' if args.maxpool else 'avgpool'}_{non_linearity}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)
     global_ranks = torch.cat(global_ranks, dim=1)
     global_traces = torch.cat(global_traces, dim=1)
-    save_mean_trace(
-        global_steps,
-        global_traces,
-        output_dir / "traces_medium_cnn.pdf",
-    )
-    save_ranks(
-        global_steps,
-        global_ranks,
-        output_dir / "ranks_medium_cnn.pdf",
-    )
+    # save_mean_trace(
+    #     global_steps,
+    #     global_traces,
+    #     output_dir / "traces_medium_cnn.pdf",
+    # )
+    # save_ranks(
+    #     global_steps,
+    #     global_ranks,
+    #     output_dir / "ranks_medium_cnn.pdf",
+    # )

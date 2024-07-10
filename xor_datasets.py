@@ -5,7 +5,7 @@ from torch.utils import data
 class XorDataset(data.Dataset):
     """Create dataset for Xor learning."""
 
-    def __init__(self, nsample=1000, test=False, discrete=True):
+    def __init__(self, nsample=1000, test=False, discrete=True, range=(0,1)):
         """Init the dataset
         :returns: TODO
 
@@ -14,6 +14,7 @@ class XorDataset(data.Dataset):
         self.nsample = nsample
         self.test = test
         # self.input_vars = torch.rand(self.nsample, 2)
+        a, b = range
         if test:
             if discrete:
                 self.input_vars = torch.tensor(
@@ -21,13 +22,13 @@ class XorDataset(data.Dataset):
                 self.nsample = 4
             else:
                 self.nsample //= 10
-                self.input_vars = torch.rand((self.nsample, 2))
+                self.input_vars = torch.rand((self.nsample, 2)) * (b - a) + a
         else:
             if discrete:
                 self.input_vars = torch.bernoulli(
                     torch.ones((self.nsample, 2)) * 0.5)
             else:
-                self.input_vars = torch.rand((self.nsample, 2))
+                self.input_vars = torch.rand((self.nsample, 2)) * (b - a) + a
 
     def __getitem__(self, index):
         """Get a data point."""

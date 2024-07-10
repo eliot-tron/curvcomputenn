@@ -1,11 +1,56 @@
 """Module implementing tools to examine the geometry of a model."""
-import sys
 import torch
 from torch import nn
 from torch.autograd.functional import jacobian, hessian
 from tqdm import tqdm
 # from scipy.integrate import solve_ivp
 from torchdiffeq import odeint, odeint_event
+
+
+def orthonormalization(
+    basis: torch.Tensor,
+    scalar_products: torch.Tensor,
+    ) -> torch.Tensor:
+    """Compute the orthonormalization of the given set of vectors according to the given [scalar_products]
+    with the Gram-Schmidt algorithm [warning: not very stable].
+    Args:
+        basis (torch.Tensor): Batch of basis (..., a, j)
+        scalar_products (torch.Tensor): Batch of scalar products (..., i, j)
+
+    Returns:
+        torch.Tensor: Orthonormal basis with dimensions (..., a, i) 
+    """
+
+    basis = basis.movedim(-2, 0)
+    result_basis = torch.zeros_like(basis)
+    # result_change = torch.diag_embed(torch.ones_like(basis)[...,0])
+
+    for i, a in enumerate(basis):
+        # correction = torch.einsum('a...i, ...ij, ...j, a...k -> a...k', result, scalar_products, a, result) / torch.einsum('a...i, ...ij, a...j -> a...', result, scalar_products, result).unsqueeze(-1)
+        # correction = correction.nan_to_num(0.).sum(0)
+        correction = torch.einsum('a...i, ...ij, ...j, a...k -> ...k', result_basis, scalar_products, a, result_basis)
+        q = a - correction
+        norm_q = torch.sqrt(torch.einsum('...i, ...ij, ...j -> ...', q, scalar_products, q))
+        norm_q[torch.isclose(norm_q, torch.zeros_like(norm_q))] = 1.
+        q = q / norm_q.unsqueeze(-1)
+        q = q.nan_to_num(0.)
+        result_basis[i] = q
+
+    basis = basis.movedim(0, -2)
+    result_basis = result_basis.movedim(0, -2)
+    # verification_product = torch.einsum('...ai, ...ij, ...bj -> ...ab', result_basis, scalar_products, result_basis)
+    # I = torch.diag_embed(torch.ones_like(verification_product)[...,-1])
+    # print(f"Scalar product verification: {verification_product}")
+    # print(f"Verification: {torch.isclose(I, verification_product).prod(-1).prod(-1)}")
+    return result_basis
+
+# I = torch.eye(4)[None, :].repeat(1,1,1)
+# B = torch.eye(4).unsqueeze(0)
+# # B = torch.rand_like(I)
+# B[:, -1, :] = 0.
+# B[:,-1,:] = - B.sum(-2).clone()
+# print(orthonormalization(B,I))
+# print(orthonormalization(I,I))
 
 
 class GeometricModel(object):
@@ -24,7 +69,6 @@ class GeometricModel(object):
         self.device = next(self.network.parameters()).device
         self.dtype = next(self.network.parameters()).dtype
 
-
     def proba(
         self,
         eval_point: torch.Tensor,
@@ -32,9 +76,11 @@ class GeometricModel(object):
 
         if len(eval_point.shape) == 3:  # TODO: trouver un truc plus propre
             eval_point = eval_point.unsqueeze(0)
+        if len(eval_point.shape) == 1:
+            eval_point = eval_point.unsqueeze(0)
         p = torch.exp(self.network(eval_point))
         if self.verbose: print(f"proba: {p}")
-        return p
+        return p[...,:-1]
 
     def score(
         self,
@@ -45,7 +91,6 @@ class GeometricModel(object):
             eval_point = eval_point.unsqueeze(0)
         
         return self.network_score(eval_point)
-
 
     def grad_proba(
         self,
@@ -58,7 +103,6 @@ class GeometricModel(object):
         grad_proba = j[wanted_class, :]
 
         return grad_proba
-
 
     def jac_proba_true_xor(self, x):
         W_1 = self.network[0].weight
@@ -130,7 +174,6 @@ class GeometricModel(object):
         
         return j
 
-        
     def test_jac_proba(
         self,
         eval_point: torch.Tensor,
@@ -156,7 +199,6 @@ class GeometricModel(object):
                 Error mean = {(J_from_score-J).abs().mean()}\n \
                 Max error = {(J_from_score-J).abs().max()} out of {max(J_from_score.abs().max(), J.abs().max())}")
 
-    
     def local_data_matrix(
         self,
         eval_point: torch.Tensor,
@@ -195,7 +237,6 @@ class GeometricModel(object):
         
         return G + epsKernel
     
-
     def fim_on_data(
         self,
         eval_point: torch.Tensor,
@@ -226,11 +267,10 @@ class GeometricModel(object):
         
         return G_on_data
 
-
     def hessian_gradproba(
         self, 
         eval_point: torch.Tensor,
-        method: str= 'torch_hessian' # 'relu_optim', 'double_jac', 'torch_hessian'
+        method: str= 'relu_optim' # 'relu_optim', 'double_jac', 'torch_hessian'
     ) -> torch.Tensor:
         """Function computing H(p_a)∇p_b 
 
@@ -286,7 +326,6 @@ class GeometricModel(object):
             
             return first_term - second_term
 
-    
     def lie_bracket(
         self,
         eval_point: torch.Tensor,
@@ -311,7 +350,6 @@ class GeometricModel(object):
         
         return H_grad.transpose(-2, -3) - H_grad
     
-
     def jac_dot_product(
         self,
         eval_point: torch.Tensor,
@@ -330,7 +368,6 @@ class GeometricModel(object):
 
         return H_grad.transpose(-2, -3) + H_grad
     
-
     def jac_metric(
         self,
         eval_point: torch.Tensor,
@@ -370,7 +407,6 @@ class GeometricModel(object):
             if self.verbose: print(f"shape of j after reshape = {jac_metric.shape}")
             # self.verbose=False
             return jac_metric
-
 
     def christoffel(
         self,
@@ -548,7 +584,6 @@ class GeometricModel(object):
                         
             return last_admissible_solution_x
 
-
     def ang_grad_lie(
         self,
         eval_point: torch.Tensor,
@@ -568,7 +603,6 @@ class GeometricModel(object):
         lie = self.lie_bracket(eval_point)
 
         return torch.einsum("zai, zij, zbcj -> zabc", J_p, G, lie) 
-        
     
     def grad_metric(
         self,
@@ -591,11 +625,10 @@ class GeometricModel(object):
         p_gradp = torch.einsum("zl, zki -> zikl", p, J_p)
         
         """Compute δ_kl ∇p_k"""
-        delta_gradp = torch.eye(J_p.shape[-2]) * J_p.unsqueeze(-1).transpose(-2, -3)
+        delta_gradp = torch.eye(J_p.shape[-2], dtype=self.dtype, device=self.device) * J_p.unsqueeze(-1).transpose(-2, -3)
 
         return torch.einsum("zai, zbk, zibc, zcl -> zakl", 
                             J_p, J_s, delta_gradp - p_gradp - p_gradp.transpose(-1,-2), J_s)
-   
     
     def grad_ang_grad(
         self,
@@ -649,7 +682,6 @@ class GeometricModel(object):
         
         return ( elmt_1 + elmt_1.permute(0, 2, 3, 1) - elmt_1.permute(0, 3, 1, 2) - elmt_2 + elmt_2.permute(0, 2, 3, 1) + elmt_2.permute(0, 3, 1, 2) ) / 2 
 
-    
     def connection_form(
         self,
         eval_point: torch.Tensor,
@@ -683,7 +715,6 @@ class GeometricModel(object):
         # return torch.einsum("zil, zkjl -> zijk", G_inv, C)
         return connection_form.permute(0, 2, 3, 1)  # shape (bs, i, j, k)
     
-    
     def jac_connection(
         self,
         eval_point: torch.Tensor,
@@ -710,7 +741,6 @@ class GeometricModel(object):
         
         
         return j
-    
     
     def connection_lie(
         self,
@@ -740,7 +770,6 @@ class GeometricModel(object):
         elmt_2 = torch.einsum("za, zbl, zkl, zijk -> zijab", P, J_p, J_s, omega)
         
         return (elmt_1 - elmt_2).transpose(-1, -2) - (elmt_1 - elmt_2)
-
 
     def grad_hessian_gradproba(
         self,
@@ -778,7 +807,6 @@ class GeometricModel(object):
                                P, J_s, J_p, H_grad)
         
         return result
-        
 
     def grad_grad_ang(
         self,
@@ -851,7 +879,6 @@ class GeometricModel(object):
         
         return elmt_1 + elmt_1.transpose(-1, -2) + elmt_2
 
-
     def grad_ang_grad_lie(
         self,
         eval_point: torch.Tensor,
@@ -906,7 +933,6 @@ class GeometricModel(object):
                       + elmt_2.permute(0, 1, 3, 4, 2)
                       + elmt_2.permute(0, 1, 4, 2, 3)) 
 
-
     def grad_connection(
         self,
         eval_point: torch.Tensor,
@@ -938,7 +964,6 @@ class GeometricModel(object):
         
         return result.permute(0, 3, 4, 1, 2)
         # return torch.einsum("zdi, zabci -> zabcd", G_inv, N)
-
     
     def d_connection_form(
         self,
@@ -955,22 +980,21 @@ class GeometricModel(object):
             torch.Tensor: Tensor dω^i_j(e_a, e_b) with dimensions (bs, i, j, a, b).
         """
         
-        J_omega = self.jac_connection(eval_point)
-        print(f"J_omega: {J_omega.shape}")
-        J_p = self.jac_proba(eval_point)
-        elmt_1_old = torch.einsum("zak, zijbk -> zijab", J_p, J_omega)
+        # J_omega = self.jac_connection(eval_point)
+        # print(f"J_omega: {J_omega.shape}")
+        # J_p = self.jac_proba(eval_point)
+        # elmt_1_old = torch.einsum("zak, zijbk -> zijab", J_p, J_omega)
         elmt_1 = self.grad_connection(eval_point)
         elmt_2 = self.connection_lie(eval_point)
-        mask = ~elmt_1_old.isnan() * ~ elmt_1.isnan()
+        # mask = ~elmt_1_old.isnan() * ~ elmt_1.isnan()
         # i = 2
         # print(f"Elmt_1_old =\n {elmt_1_old[0,i,i,:4,:4]}")
         # print(f"Elmt_1 =\n {elmt_1[0,i,i,:4,:4]}")
-        print(f"Is it a good estimate for domaga? {'Yes' if torch.allclose(elmt_1[mask], elmt_1_old[mask], equal_nan = True) else 'No'}\n \
-                Error mean = {(elmt_1_old[mask]-elmt_1[mask]).pow(2).mean()}\n \
-                Max error = {(elmt_1_old[mask]-elmt_1[mask]).abs().max()} out of {max(elmt_1_old[mask].abs().max(), elmt_1[mask].abs().max())}")
+        # print(f"Is it a good estimate for domaga? {'Yes' if torch.allclose(elmt_1[mask], elmt_1_old[mask], equal_nan = True) else 'No'}\n \
+        #         Error mean = {(elmt_1_old[mask]-elmt_1[mask]).pow(2).mean()}\n \
+        #         Max error = {(elmt_1_old[mask]-elmt_1[mask]).abs().max()} out of {max(elmt_1_old[mask].abs().max(), elmt_1[mask].abs().max())}")
         
         return elmt_1 - elmt_1.transpose(-1, -2) - elmt_2
-        
         
     def wedge_connection_forms(
         self,
@@ -991,7 +1015,6 @@ class GeometricModel(object):
         elmt = torch.einsum("zika, zkjb -> zijab", omega, omega)
 
         return elmt - elmt.transpose(-1, -2)
-
     
     def curvature_form(
         self,
@@ -1012,4 +1035,60 @@ class GeometricModel(object):
         
         return domega + wedge
 
+    def curvature_form_ONB(
+        self,
+        eval_point: torch.Tensor,
+        ) -> torch.Tensor:
+        """Compute the curvature forms Ω^i_j(E_a, E_b) with (E_k) an Ortho Normal Basis.
 
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor (Ω^i_j(E_a, E_b)) with dimensions (bs, i, j, a, b)
+        """
+        J_p = self.jac_proba(eval_point)
+        G_p = self.local_data_matrix(eval_point)
+        E_p = orthonormalization(J_p, G_p)
+        passage_p = torch.linalg.lstsq(J_p.transpose(-1, -2), E_p.transpose(-1, -2)).solution.transpose(-1, -2)
+        print(f"Passage is ok: {torch.allclose(torch.einsum('...ik, ...kj -> ...ij', passage_p, J_p), E_p)}")
+        Omega = self.curvature_form(eval_point)
+
+        return torch.einsum('...ijcd, ...ac, ...bd -> ...ijab', Omega, passage_p, passage_p)
+
+    def rici_curvature(
+        self,
+        eval_point: torch.Tensor,
+        ) -> torch.Tensor:
+
+        """Compute the Rici curvature form Ric(e_a, e_b).
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor (Ric(e_a, e_b)) with dimensions (bs, a, b)
+        """
+
+        Omega = self.curvature_form_ONB(eval_point)
+        return torch.einsum('...kbka -> ...ab')
+
+    def scalar_curvature(
+        self,
+        eval_point: torch.Tensor,
+        ) -> torch.Tensor:
+
+        """Compute the Scalar curvature form S.
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor (S) with dimensions (bs)
+        """
+
+        Omega = self.curvature_form_ONB(eval_point)
+        return torch.einsum('...klkl -> ...', Omega)

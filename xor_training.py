@@ -12,9 +12,8 @@ from torch import optim
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
-from model_manifold.plot import save_images
 from xor_datasets import XorDataset
-from xor_networks import xor_net
+from xor_networks import xor_net, xor_net_old
 
 
 def train_epoch(
@@ -96,18 +95,24 @@ def exemplar_batch(batch_size: int, train: bool) -> torch.Tensor:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Train a basic model on XOR",
-        usage="python3 mnist_training.py [--batch-size BATCH-SIZE "
+        usage="python3 xor_training.py [--batch-size BATCH-SIZE "
         "--epochs EPOCHS --lr LR --seed SEED --output-dir OUTPUT-DIR]",
     )
     parser.add_argument("--batch-size", type=int, default=50, help="Batch size")
     parser.add_argument("--epochs", type=int, default=30, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate")
+    parser.add_argument("--activation", type=str, default="sigmoid", help="Activation function [sigmoid|relu|gelu]")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
         "--output-dir",
         type=str,
         default="checkpoint",
         help="Model checkpoint output directory",
+    )
+    parser.add_argument(
+        "--old",
+        action="store_true",
+        help="Train the older version of XorNet."
     )
 
     args = parser.parse_args(sys.argv[1:])
@@ -119,7 +124,18 @@ if __name__ == "__main__":
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = xor_net()  
+    if args.activation.lower() == "sigmoid":
+        non_linearity = nn.Sigmoid()
+    elif args.activation.lower() == "relu":
+        non_linearity = nn.ReLU()
+    elif args.activation.lower() == "gelu":
+        non_linearity = nn.GELU()
+    if args.old:
+        model = xor_net_old(
+            non_linearity=non_linearity
+        )
+    else:
+        model = xor_net(non_linearity=non_linearity) 
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
     train_loader = xor_loader(args.batch_size, train=True)
@@ -132,6 +148,6 @@ if __name__ == "__main__":
         )
         global_steps.append(epoch_steps + epoch * len(train_loader))
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"xor_net_{epoch + 1:02d}.pt")
+        torch.save(model.state_dict(), output_dir / f"xor_net{'_old' if args.old else ''}_{args.activation.lower()}_{epoch + 1:02d}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)
