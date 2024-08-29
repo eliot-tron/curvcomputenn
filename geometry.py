@@ -80,7 +80,7 @@ class GeometricModel(object):
             eval_point = eval_point.unsqueeze(0)
         p = torch.exp(self.network(eval_point))
         if self.verbose: print(f"proba: {p}")
-        return p[...,:-1]
+        return p  # [...,:-1]
 
     def score(
         self,

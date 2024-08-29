@@ -24,45 +24,45 @@ def colorbar(mappable):
     plt.sca(last_axes)
     return cbar
 
-def plot_debug(
-    curvature: model_curvature_computer,
-    eval_point: torch.Tensor,
-    ) -> None:
+#  def plot_debug(
+    #  curvature: model_curvature_computer,
+    #  eval_point: torch.Tensor,
+    #  ) -> None:
 
-    j = curvature.jac_proba(eval_point)
-    fim_on_data = curvature.fim_on_data(eval_point).detach()
-    euclidean_product_on_data = torch.einsum('zai, zki, zkj, zbj-> zab',
-                                             j, j, j, j)
-    bs, C, x = j.shape
-    bs, _, px_row, px_col = eval_point.shape
-    j = j.reshape(bs, C, px_row, px_col)
-    date = datetime.now().strftime("%y%m%d-%H%M%S")
-    output_dir = f"output/{date}/"
-    save_matrices(
-        matrices=eval_point,
-        titles=["Data point"],
-        output_dir=output_dir,
-        output_name="debug_data_point",
-    )
-    save_matrices(
-        matrices=torch.cat((fim_on_data.unsqueeze(1), euclidean_product_on_data.unsqueeze(1)), dim=1),
-        titles=[r"$G(e_i,e_j)$", r"$e_i ⋅ e_j$"],
-        output_dir=output_dir,
-        output_name="debug_metric_grad_proba",
-        log_scales=True,
-    )
-    save_matrices(
-        matrices=j,
-        titles=[f"Class n°{i}" for i in range(C)],
-        output_dir=output_dir,
-        output_name="debug_jacobians",
-        no_ticks=True,
-        )
+    #  j = curvature.jac_proba(eval_point)
+    #  fim_on_data = curvature.fim_on_data(eval_point).detach()
+    #  euclidean_product_on_data = torch.einsum('zai, zki, zkj, zbj-> zab',
+                                             #  j, j, j, j)
+    #  bs, C, x = j.shape
+    #  bs, _, px_row, px_col = eval_point.shape
+    #  j = j.reshape(bs, C, px_row, px_col)
+    #  date = datetime.now().strftime("%y%m%d-%H%M%S")
+    #  output_dir = f"output/{date}/"
+    #  save_matrices(
+        #  matrices=eval_point,
+        #  titles=["Data point"],
+        #  output_dir=output_dir,
+        #  output_name="debug_data_point",
+    #  )
+    #  save_matrices(
+        #  matrices=torch.cat((fim_on_data.unsqueeze(1), euclidean_product_on_data.unsqueeze(1)), dim=1),
+        #  titles=[r"$G(e_i,e_j)$", r"$e_i ⋅ e_j$"],
+        #  output_dir=output_dir,
+        #  output_name="debug_metric_grad_proba",
+        #  log_scales=True,
+    #  )
+    #  save_matrices(
+        #  matrices=j,
+        #  titles=[f"Class n°{i}" for i in range(C)],
+        #  output_dir=output_dir,
+        #  output_name="debug_jacobians",
+        #  no_ticks=True,
+        #  )
 
 # TODO: plot matrices of different shapes on same plot
 def save_matrices(
     matrices: torch.Tensor,
-    titles: Union[list[list[str]], list[str]],
+    titles: Optional[Union[list[list[str]], list[str]]]=None,
     output_dir: Union[str, Path]='output/',
     output_name: str="matrices",
     log_scales: Union[bool, list[bool]]=False,

@@ -14,6 +14,7 @@ from torchvision import datasets, transforms
 from torchdiffeq import odeint
 
 import mnist_networks, cifar10_networks
+from plot import save_matrices
 from xor3d_datasets import Xor3dDataset
 from xor3d_networks import xor3d_net
 from xor_datasets import XorDataset
@@ -274,6 +275,7 @@ class Experiment(object):
                     sc = ax.scatter(X, Y, Z,  c=scalar_curvature)
                     fig.colorbar(sc)
                     plt.show()
+                print(f"Scalar curvature:\n{scalar_curvature}")
                 # proba_on_grid, class_on_grid = torch.max(geo_model.proba(points), dim=1)
                 # proba_on_grid = proba_on_grid.reshape((*grid1D.shape, *grid1D.shape))
                 # class_on_grid = class_on_grid.reshape((*grid1D.shape, *grid1D.shape))
@@ -281,7 +283,6 @@ class Experiment(object):
                 # scamap = cm.ScalarMappable(norm=Normalize(vmin=-0.5, vmax=number_of_classes-0.5), cmap=cmap)
                 # color_from_class = scamap.to_rgba(class_on_grid)
                 # ax.plot_surface(grid2Dx, grid2Dy, proba_on_grid.detach(), facecolors=color_from_class, cmap=cmap, rstride=1, cstride=1, lw=0, alpha=0.6)
-    
 
     def save_function_neighborhood(
         self,
@@ -371,6 +372,25 @@ class Experiment(object):
                 ax.plot_surface(grid2Dx, grid2Dy, min_norm_grad_proba_on_grid.detach(), facecolors=color_from_class, cmap=cmap, rstride=1, cstride=1, lw=0, alpha=0.6)
                 fig.colorbar(scamap, ticks=range(number_of_classes))
                 plt.show()
+
+    def plot_connection_forms(
+        self,
+        savedirectory: str | Path = "./output/",
+        ):
+        """Plot ω_i^j(∇p_k) for k=1,...,C with matplotlib.pyplot.matshow and save them."""
+        if self.num_samples > 10:
+            print("WARNING: Trying to print save too many connection forms (max 10).") 
+            self.num_samples = 10
+            self.input_points = self.input_points[:10]
+        with torch.no_grad():
+            omega = self.geo_model.connection_form(self.input_points).movedim(-1, 1)
+            predictions = self.geo_model.proba(self.input_points)
+            predicted_class = predictions.argmax(1)
+            save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}")
+            save_matrices(omega, [fr"$\omega(\nabla p_{i})$" for i in range(omega.shape[1])], output_dir=savedirectory, output_name=f"connection_forms_{self.dataset_name}_{self.non_linearity}")
+
+                
+        
 
 class MNISTExp(Experiment):
 

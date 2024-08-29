@@ -44,7 +44,7 @@ if __name__ == "__main__":
         "--task",
         type=str,
         default="curvature",
-        choices=['curvature', 'foliation', 'rank2D', 'proba2D', 'trace2D', 'gradproba'],
+        choices=['curvature', 'foliation', 'rank2D', 'proba2D', 'trace2D', 'gradproba', 'connection-forms'],
         help="Task."
     )
     parser.add_argument(
@@ -227,6 +227,10 @@ if __name__ == "__main__":
                 plot_range=10,
             )
         print('wait')
+
+    elif task == 'connection-forms':
+        for i, experiment in enumerate(tqdm(experiment_list)):
+            experiment.plot_connection_forms(savedirectory=savedirectory)
 
     for experiment in experiment_list:
         experiment.save_info_to_txt(savedirectory)
