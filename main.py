@@ -14,6 +14,7 @@ from experiment import *
 
 
 if __name__ == "__main__":
+    plt.rcParams.update({'font.size': 14})
     parser = argparse.ArgumentParser(
         description="CIDRE: Comparison based on Information between Datasets with degenerate Riemannian metric's Eigenvalues",
     )
@@ -221,16 +222,21 @@ if __name__ == "__main__":
         # grad_norms = jac_probas.norm(p=2, dim=-1, keepdim=True)
         # jac_normalized = jac_probas / grad_norms
         for i, experiment in enumerate(tqdm(experiment_list)):
-            experiment.save_function_neighborhood(
-                function='gradproba',
-                steps=10,
-                plot_range=10,
+
+            experiment.save_gradproba(
+                savedirectory=savedirectory
             )
+            # experiment.save_function_neighborhood(
+            #     function='gradproba',
+            #     steps=10,
+            #     plot_range=10,
+            # )
         print('wait')
 
     elif task == 'connection-forms':
         for i, experiment in enumerate(tqdm(experiment_list)):
             experiment.plot_connection_forms(savedirectory=savedirectory)
+
 
     for experiment in experiment_list:
         experiment.save_info_to_txt(savedirectory)

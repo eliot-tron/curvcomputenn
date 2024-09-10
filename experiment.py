@@ -1,4 +1,5 @@
 from os import makedirs, path
+from math import ceil, floor, sqrt
 # import time
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -14,7 +15,7 @@ from torchvision import datasets, transforms
 from torchdiffeq import odeint
 
 import mnist_networks, cifar10_networks
-from plot import save_matrices
+from plot import colorbar, save_matrices
 from xor3d_datasets import Xor3dDataset
 from xor3d_networks import xor3d_net
 from xor_datasets import XorDataset
@@ -22,6 +23,10 @@ from xor_networks import xor_net
 from autoattack import AutoAttack
 
 # TODO: break into multiple files.
+
+def batch_normalize(M, max: int=1, min:int=0 ):
+    M_normalized = (M - M.min(0).values) / (M.max(0).values - M.min(0).values)
+    return M_normalized * (max - min) + min
 
 class Experiment(object):
 
@@ -205,6 +210,28 @@ class Experiment(object):
         else:
             raise NotImplementedError(f"The dataset {self.dataset_name} has no associated network yet.")
 
+    def plot_input_points(self,
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/"
+                          ) -> None:
+        """Plot and save the input points in a .pdf format.
+        """
+
+        raise NotADirectoryError(f"plot_input_points not implemented for {self.dataset_name} dataset.")
+
+    def get_network_accuracy(self):
+        """Compute the accuracy of the network on the validation set."""
+        self.network.eval()
+        correct = 0
+        with torch.no_grad():
+            for data, target in tqdm(self.input_space['val']):
+                data = data.to(self.device).unsqueeze(0)
+                output = self.network(data)
+                predictions = output.argmax(dim=1, keepdim=True)
+                correct += predictions.eq(target).sum().item()
+        
+        return correct, 100.0 * correct / len(self.input_space['val'])
+
     def plot_foliation(self,
                        transverse: bool=True,
                        nleaves: Optional[int]=None,
@@ -375,11 +402,11 @@ class Experiment(object):
 
     def plot_connection_forms(
         self,
-        savedirectory: str | Path = "./output/",
+        savedirectory: Union[str, Path] = "./output/",
         ):
         """Plot ω_i^j(∇p_k) for k=1,...,C with matplotlib.pyplot.matshow and save them."""
         if self.num_samples > 10:
-            print("WARNING: Trying to print save too many connection forms (max 10).") 
+            print("WARNING: Trying to print too many connection forms (max 10).") 
             self.num_samples = 10
             self.input_points = self.input_points[:10]
         with torch.no_grad():
@@ -389,8 +416,40 @@ class Experiment(object):
             save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}")
             save_matrices(omega, [fr"$\omega(\nabla p_{i})$" for i in range(omega.shape[1])], output_dir=savedirectory, output_name=f"connection_forms_{self.dataset_name}_{self.non_linearity}")
 
-                
-        
+    def save_gradproba(
+        self,
+        savedirectory: Union[str, Path] = "./output/",
+        normalize: bool=False,
+        log_scales: bool=False,
+        ):
+        """Plot (J_p J_p^T) with matplotlib.pyplot.matshow and save them."""
+        if self.num_samples > 50:
+            print("WARNING: Trying to save too many gradproba (max 50).") 
+            self.num_samples = 50
+            self.input_points = self.input_points[:self.num_samples]
+        with torch.no_grad():
+            J_p = self.geo_model.jac_proba(self.input_points)
+            # J_p = J_p / J_p.norm(p=2, dim=-1, keepdim=True)
+            U = torch.einsum("zak, zbk -> zab", J_p, J_p)
+            dim = self.geo_model.local_data_matrix(self.input_points)
+            # dim_on_data = self.geo_model.fim_on_data(self.input_points)
+            dim_on_data = torch.einsum("zai, zij, zbj -> zab", J_p, dim, J_p)
+            # predictions = self.geo_model.proba(self.input_points)
+            # predicted_class = predictions.argmax(1)
+            if normalize:
+                U = batch_normalize(U, max=1, min=-1)
+                dim_on_data = batch_normalize(dim_on_data, max=1, min=-1)
+            self.plot_input_points(savedirectory=savedirectory)
+            save_matrices(U,
+                          [f"Batch n°{i}\n"+r"$(\sum_k\partial_k p_a \partial_k p_b)$" for i in range(self.num_samples)],
+                          output_dir=savedirectory, 
+                          output_name=f"scalar_product_grad_proba_{self.dataset_name}_{self.non_linearity}",
+                          log_scales=log_scales)
+            save_matrices(dim_on_data,
+                          [f"Batch n°{i}\n"+r"$g(e_a, e_b)$" for i in range(self.num_samples)],
+                          output_dir=savedirectory,
+                          output_name=f"dim_on_data_{self.dataset_name}_{self.non_linearity}",
+                          log_scales=log_scales)
 
 class MNISTExp(Experiment):
 
@@ -446,6 +505,18 @@ class MNISTExp(Experiment):
 
         return super().init_networks()
 
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
 
 class CIFAR10Exp(Experiment):
 
@@ -500,6 +571,54 @@ class CIFAR10Exp(Experiment):
         self.network_score = cifar10_networks.medium_cnn(self.checkpoint_path, score=True, maxpool=maxpool)
 
         return super().init_networks()
+
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        class_names = self.input_space['train'].classes
+        print([f"n°{i} is {n}\n" for i, n in enumerate(class_names)])
+        # save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
+
+        if not path.isdir(savedirectory):
+            makedirs(savedirectory)
+        
+        titles = [f"Batch n°{i}\nPredicted: {class_names[predicted_class[i]]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)]
+
+        number_of_matrices = self.num_samples
+        n_row, n_col = floor(sqrt(number_of_matrices)) , ceil(sqrt(number_of_matrices))
+        figure, axes = plt.subplots(n_row, n_col, figsize=(n_col*3, n_row*3), squeeze=False)
+
+        normalization = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # TODO: plus propre
+        mean = torch.tensor(normalization.mean, device=self.device).view(-1, 1, 1)
+        std = torch.tensor(normalization.std, device=self.device).view(-1, 1, 1)
+        self.input_points *= std
+        self.input_points += mean
+        for index, matrix, title in zip(range(number_of_matrices), self.input_points, titles):
+
+            row = index // n_col
+            col = index % n_col
+            matrix_subplot = axes[row, col].imshow(matrix.movedim(-3, -1))
+            axes[row, col].tick_params(left = False, right = False, top=False, labeltop=False, labelleft = False , labelbottom = False, bottom = False)
+            axes[row, col].set_title(title)
+        
+        for axes_to_remove in range(number_of_matrices, n_row*n_col):
+            row = axes_to_remove // n_col
+            col = axes_to_remove % n_col
+            axes[row, col].axis("off")
+
+        figure.tight_layout()
+        saving_path = f"{savedirectory}"
+        saving_path = f"{saving_path}input_points_{self.dataset_name}_{self.non_linearity}.pdf"
+
+        plt.savefig(saving_path, transparent=True, dpi=None)
 
 
 class XORExp(Experiment):
@@ -705,6 +824,19 @@ class LettersExp(Experiment):
         }
         return super().init_input_space(root, download)
 
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
+
 
 class FashionMNISTExp(Experiment):
 
@@ -744,6 +876,19 @@ class FashionMNISTExp(Experiment):
         ) for x in ['train', 'val']
         }
         return super().init_input_space(root, download)
+
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
 
 
 class KMNISTExp(Experiment):
@@ -785,6 +930,19 @@ class KMNISTExp(Experiment):
         }
         return super().init_input_space(root, download)
 
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
+
 
 class QMNISTExp(Experiment):
 
@@ -824,6 +982,19 @@ class QMNISTExp(Experiment):
         ) for x in ['train', 'val']
         }
         return super().init_input_space(root, download)
+
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
 
 
 class CIFARMNISTExp(Experiment):
@@ -872,6 +1043,19 @@ class CIFARMNISTExp(Experiment):
         }
         return super().init_input_space(root, download)
 
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
+
 
 # TODO: what to do with Noise and Adversarial? function ? class ? how to do not-base-experiments ? Remove adversarial_budget and Noise/Adversarial from dataset_name
 
@@ -919,6 +1103,20 @@ class NoiseExp(Experiment):
 
     def init_networks(self):
         raise ValueError(f"{self.dataset_name} cannot have an associated network.")
+
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
+
 
 
 class AdversarialExp(Experiment):
@@ -975,6 +1173,20 @@ class AdversarialExp(Experiment):
 
     def init_networks(self):
         raise ValueError(f"{self.dataset_name} cannot have an associated network.")
+
+    def plot_input_points(self, 
+                          stop_index: Optional[int]=None,
+                          savedirectory: Union[str, Path]="./output/",
+                          ) -> None:
+        if stop_index is None:
+            stop_index = self.num_samples
+        if stop_index > self.num_samples:
+            print("Warning: trying to plot more points than available in the dataset.")
+            stop_index = self.num_samples
+        predictions = self.geo_model.proba(self.input_points[:stop_index])
+        predicted_class = predictions.argmax(1)
+        save_matrices(self.input_points.squeeze(1), [f"Batch n°{i}\nPredicted: {predicted_class[i]}\nwith proba {predictions[i][predicted_class[i]]:.3f}" for i in range(self.num_samples)], output_dir=savedirectory, output_name=f"input_points_{self.dataset_name}_{self.non_linearity}", no_ticks=True)
+
 
 
 implemented_experiment_dict = {

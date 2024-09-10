@@ -254,7 +254,7 @@ class GeometricModel(object):
         Returns:
             torch.Tensor: tensor g_ij with dimensions (bs, i, j).
         """
-
+        raise NotImplementedError("out of date: needs to be checked")
         J_s = self.jac_score(eval_point, create_graph=create_graph)
         p = self.proba(eval_point)
         P = torch.diag_embed(p, dim1=1)
