@@ -54,6 +54,13 @@ if __name__ == "__main__":
         help="Permutes randomly the inputs."
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        metavar='seed',
+        default=None,
+        help="Seed to use if not random."
+    )
+    parser.add_argument(
         "--savedirectory",
         type=str,
         metavar='path',
@@ -109,23 +116,28 @@ if __name__ == "__main__":
     restrict_to_class = args.restrict
     pool = "maxpool" if args.maxpool else "avgpool"
     date = datetime.now().strftime("%y%m%d-%H%M%S")
+
+    # manual_seed = None
+    # if not args.random:
+    manual_seed = args.seed
+    if manual_seed is not None:
+        print(f"Using seed {manual_seed}.")
+        torch.manual_seed(manual_seed)
+        torch.cuda.manual_seed(manual_seed)
+        torch.cuda.manual_seed_all(manual_seed)  # if you are using multi-GPU.
+        np.random.seed(manual_seed)  # Numpy module.
+        random.seed(manual_seed)  # Python random module.
+        torch.manual_seed(manual_seed)
+        torch.backends.cudnn.benchmark = False  # type: ignore
+        torch.backends.cudnn.deterministic = True # type: ignore
+
     savedirectory = args.savedirectory + \
         ("" if args.savedirectory[-1] == '/' else '/') + \
         f"{'-'.join(dataset_names)}/{task}/{dtype}/" + \
-        f"{date}_nsample={num_samples}{f'_class={restrict_to_class}' if restrict_to_class is not None else ''}_{pool}_{'-'.join(non_linearities)}/"
+        f"{date}_nsample={num_samples}{f'_class={restrict_to_class}' if restrict_to_class is not None else ''}_{pool}_{'-'.join(non_linearities)}" + \
+        f"_manual-seed={manual_seed}/"
     if not path.isdir(savedirectory):
         makedirs(savedirectory)
-
-    if not args.random:
-        seed = 42
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-        np.random.seed(seed)  # Numpy module.
-        random.seed(seed)  # Python random module.
-        torch.manual_seed(seed)
-        torch.backends.cudnn.benchmark = False  # type: ignore
-        torch.backends.cudnn.deterministic = True # type: ignore
 
     experiment_list = []
     base_experiment = None

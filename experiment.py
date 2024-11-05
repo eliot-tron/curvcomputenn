@@ -450,6 +450,7 @@ class Experiment(object):
                           output_dir=savedirectory,
                           output_name=f"dim_on_data_{self.dataset_name}_{self.non_linearity}",
                           log_scales=log_scales)
+            torch.save((self.input_points, dim_on_data), f"{savedirectory}dim_on_data_{self.dataset_name}_{self.non_linearity}_points-dim.pt")
 
 class MNISTExp(Experiment):
 
