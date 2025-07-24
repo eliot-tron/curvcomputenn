@@ -16,7 +16,7 @@ from experiment import *
 if __name__ == "__main__":
     plt.rcParams.update({'font.size': 14})
     parser = argparse.ArgumentParser(
-        description="CIDRE: Comparison based on Information between Datasets with degenerate Riemannian metric's Eigenvalues",
+        description="CurvComputeNN: Compute the connection and curvature forms of the DIM associated to a neural network.",
     )
     parser.add_argument(
         "--datasets",

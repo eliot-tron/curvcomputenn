@@ -1,7 +1,6 @@
 from datetime import datetime
 from math import ceil, floor, sqrt
 from os import makedirs, path
-from tkinter import W
 from typing import Optional, Union, Tuple
 from pathlib import Path
 from matplotlib import cm
